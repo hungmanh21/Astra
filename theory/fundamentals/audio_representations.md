@@ -23,7 +23,7 @@ This writes `theory/fundamentals/examples/output/audio_representations.png` (a 2
 
 ## 1. Waveform (time domain)
 
-**Status:** Not started
+**Status:** Finalized
 
 **Questions:**
 
@@ -38,13 +38,17 @@ This writes `theory/fundamentals/examples/output/audio_representations.png` (a 2
    > Your answer:
 
 ### Finalized notes
-*(filled in during Phase 2)*
+
+- **Axes:** x = time, y = amplitude — the raw PCM sample value at each instant (a proxy for instantaneous air pressure deviation, per `signal_basics.md`).
+- **What you can read directly:** loudness/envelope over time (quiet vs loud passages), onsets and silences, rough duration, and for a very simple, slowly-varying tone at high zoom, a rough sense of periodicity. What you *can't* tell: which frequencies are present, or timbre — a loud low hum and a loud hiss can produce very similar-looking envelopes.
+- **Smooth vs blocky:** the plotted curve is literally the discrete PCM samples connected by straight lines. Zoomed out (many samples per pixel), it renders as a dense filled band and looks "smooth." Zoomed in near individual samples, you see the actual discrete points and straight-line segments between them — "blocky." Higher sampling rate = more points per unit time = smoother-looking curve at a given zoom level, but this is a rendering effect, not new information.
+- **Code example:** No — at the zoom level of the full 1-second plot, both the steady two-tone segment and the 1–3 kHz chirp compress into a dense oscillating band that looks visually similar throughout; you cannot pick out where the frequency content changes just from the envelope shape. What's missing is a *frequency-domain* view — the waveform tells you "how loud," not "what pitch." That gap is exactly what Topics 2–4 address.
 
 ---
 
 ## 2. Frequency spectrum (Fourier Transform / FFT)
 
-**Status:** Not started
+**Status:** Finalized
 
 **Questions:**
 
@@ -65,13 +69,17 @@ This writes `theory/fundamentals/examples/output/audio_representations.png` (a 2
    > Your answer:
 
 ### Finalized notes
-*(filled in during Phase 2)*
+
+- **What it decomposes into:** a Fourier Transform decomposes a signal into a sum of sinusoids (single-frequency waves), each with a magnitude and a phase. A magnitude spectrum plot puts frequency on the x-axis and "how much of that frequency is present" (magnitude) on the y-axis.
+- **Why a single whole-signal FFT loses timing (validated):** it implicitly treats the entire analyzed window as one stationary block — the DFT math assumes the window repeats periodically forever, i.e. the same frequency content the whole way through. Each output bin is one number per frequency covering the *entire* window, with no per-bin timestamp. Two tones that never overlapped and two tones playing simultaneously the whole time can produce a nearly identical spectrum — the "when" is thrown away, only "what's present overall" survives.
+- **Highest frequency visible at 16 kHz:** 8000 Hz (`sr / 2`), the Nyquist frequency — a spectrum can never show energy above that, by construction of the FFT bins for real-valued audio.
+- **Code example:** No, you can't tell ordering from the spectrum plot — it shows two sharp peaks (440/880 Hz) and a broad hump (the chirp's energy spread across 1–3 kHz) with no indication of which came first, exactly because the FFT collapsed the time axis away.
 
 ---
 
 ## 3. Spectrogram (Short-Time Fourier Transform)
 
-**Status:** Not started
+**Status:** Finalized
 
 **Questions:**
 
@@ -92,13 +100,17 @@ This writes `theory/fundamentals/examples/output/audio_representations.png` (a 2
    > Your answer:
 
 ### Finalized notes
-*(filled in during Phase 2)*
+
+- **Problem solved vs a whole-signal FFT:** instead of one FFT over the entire signal, the STFT splits it into many short, overlapping windows and runs an FFT on each one separately. That recovers a time axis: you get a frequency spectrum *per window*, so you can see frequency content change over time, not just its overall presence.
+- **The window-length trade-off:** shorter windows give better **time** resolution but worse **frequency** resolution, and vice versa. This is unavoidable, not a tuning bug — see the ELI5 + detailed explanation above: FFT frequency resolution is `sample_rate / N` Hz per bin, so fewer samples (short window) means coarser frequency bins but a narrower, more precise time slice; more samples (long window) means finer frequency bins but content within that longer window gets smeared together in time. It's a time–frequency uncertainty trade-off — you choose the window length based on whether you care more about *when* or about *exact pitch*.
+- **Three dimensions on a 2D plot:** time (x-axis), frequency (y-axis), and magnitude/energy at that time-frequency point — shown as color/intensity (usually in dB), since a 2D image only has two spatial axes to spend on time and frequency.
+- **Code example:** Yes, it matches `generate_signal()` exactly — two flat horizontal lines (440 Hz and its 880 Hz harmonic) for the first 0.5s, then a rising diagonal line from roughly 1000→3000 Hz for the second 0.5s. The diagonal's slope is physically the chirp's **sweep rate** — how many Hz the instantaneous frequency increases per second (here, `(3000-1000) Hz / 0.5 s = 4000 Hz/s`).
 
 ---
 
 ## 4. Mel spectrogram
 
-**Status:** Not started
+**Status:** Finalized
 
 **Questions:**
 
@@ -119,13 +131,17 @@ This writes `theory/fundamentals/examples/output/audio_representations.png` (a 2
    > Your answer:
 
 ### Finalized notes
-*(filled in during Phase 2)*
+
+- **What the mel scale approximates:** human pitch perception is non-linear — we're much more sensitive to a given Hz difference at low frequencies than at high ones. A 100 Hz → 200 Hz jump sounds like a huge pitch change; an 8000 Hz → 8100 Hz jump is barely perceptible even though it's the same 100 Hz gap. The mel scale is a frequency remapping designed so that equal *mel* distances correspond to roughly equal *perceived* pitch distances.
+- **Effect on resolution:** converting to mel gives **more** bins/resolution to low frequencies and **fewer** to high frequencies, relative to a linear scale — the mel scale compresses the high end and expands (relatively) the low end, matching where human hearing (and speech) cares most.
+- **Why ASR models prefer it:** most phonetically important speech energy sits in the low/mid frequency range, which mel spectrograms represent with disproportionately more resolution — for the perceptually irrelevant task of speech recognition. It also compresses the input (far fewer mel bins than raw linear FFT bins), reducing compute and giving the model a smaller, denser, more perceptually-relevant feature space than either a raw linear spectrogram or the raw waveform, which empirically improves training efficiency and accuracy for speech models.
+- **Code example:** Yes — on the mel axis, the 440 Hz and 880 Hz tones take up noticeably *more* vertical space, proportionally, than they did on the linear axis, exactly matching Q2: mel expands low-frequency spacing, so two low tones that were close together on a linear axis get pushed further apart on the mel axis.
 
 ---
 
 ## 5. Choosing a representation for this project
 
-**Status:** Not started
+**Status:** Finalized
 
 **Questions:**
 
@@ -143,10 +159,17 @@ This writes `theory/fundamentals/examples/output/audio_representations.png` (a 2
 - [facebook/wav2vec2-base-960h — Hugging Face](https://huggingface.co/facebook/wav2vec2-base-960h)
 
 ### Finalized notes
-*(filled in during Phase 2)*
+
+- **Whisper preprocessing:** resample/downmix raw mic or call audio to 16 kHz mono, then compute a log-mel spectrogram (80 channels for base/small/medium, 128 for `large-v3`) using a 25 ms window with a 10 ms stride (400/160 samples at 16 kHz), normalized the way Whisper's feature extractor expects. The model never sees raw audio — only the resulting log-mel frames, typically chunked/padded to the 30s window Whisper was trained on.
+- **wav2vec2 implication:** since it takes the raw waveform directly (just resampled to 16 kHz), whatever frequency/feature extraction Whisper does explicitly as a *preprocessing* step (the mel spectrogram) must instead happen **inside** the model — concretely, a stack of 1D convolutional layers at the front of wav2vec2 (its CNN feature encoder) learns a data-driven transformation that plays the same role a hand-crafted mel spectrogram plays for Whisper, just learned from data instead of fixed by a formula.
+- **Real-time latency implication:** computing a mel spectrogram per chunk is a fast, deterministic, FFT-based operation (`O(n log n)`) — in practice it's a negligible fraction of total pipeline latency compared to the model's own forward pass, especially for encoder-decoder models the size of Whisper. It's generally **not** a meaningful reason to prefer wav2vec2 over Whisper on latency grounds alone; for this project, model accuracy, streaming/chunking support, and available fine-tunes matter far more than whether feature extraction happens before or inside the model.
 
 ---
 
-## Summary (filled in after all topics are finalized)
+## Summary
 
-*(A short consolidated cheat-sheet will go here once every topic above is finalized.)*
+- **Waveform:** time vs amplitude. Shows loudness/timing, not frequency content.
+- **Spectrum (FFT):** frequency vs magnitude, over an entire window. Shows *what* frequencies are present, not *when* — a single FFT assumes the window is stationary throughout.
+- **Spectrogram (STFT):** many short FFTs over sliding windows → time *and* frequency, at the cost of a hard trade-off: short windows = good time / poor frequency resolution, long windows = good frequency / poor time resolution (`resolution ≈ sample_rate / window_length`).
+- **Mel spectrogram:** a spectrogram with frequency remapped to the mel scale, which matches human (and speech-relevant) pitch perception — more resolution at low frequencies, less at high, and a smaller, denser feature space than a linear spectrogram.
+- **For this project:** Whisper expects a precomputed log-mel spectrogram (80/128 mel bins, 25 ms/10 ms), while wav2vec2-family models expect the raw 16 kHz waveform and learn the equivalent transformation internally via convolutional layers. The mel-computation step itself is cheap relative to model inference, so it isn't a real-time blocker either way.

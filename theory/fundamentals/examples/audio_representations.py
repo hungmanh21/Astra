@@ -53,23 +53,32 @@ def generate_signal(sr: int = SR) -> np.ndarray:
 
 
 def plot_waveform(y: np.ndarray, sr: int, ax: plt.Axes) -> None:
-    t = np.arange(len(y)) / sr
-    ax.plot(t, y, linewidth=0.5)
+    librosa.display.waveshow(y, sr=sr, ax=ax)
     ax.set_title("Waveform (time domain)")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Amplitude")
 
 
 def plot_spectrum(y: np.ndarray, sr: int, ax: plt.Axes) -> None:
-    """Single FFT over the whole signal — frequency content, no timing."""
-    n = len(y)
-    magnitude = np.abs(np.fft.rfft(y))
-    freqs = np.fft.rfftfreq(n, d=1 / sr)
-    ax.plot(freqs, magnitude, linewidth=0.7)
+    """Single FFT over the whole signal — frequency content, no timing.
+
+    Windowed the same way the HF Audio Course does it: a Hann window
+    before the FFT, magnitude converted to dB, frequency axis on a log
+    scale. The Hann taper just reduces spectral-leakage artifacts at the
+    edges of the analyzed window — it doesn't change the point Topic 2 is
+    making, since we still run one FFT over the *whole* signal.
+    """
+    window = np.hanning(len(y))
+    dft = np.fft.rfft(y * window)
+    amplitude_db = librosa.amplitude_to_db(np.abs(dft), ref=np.max)
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=len(y))
+
+    ax.plot(freqs, amplitude_db, linewidth=0.7)
     ax.set_title("Frequency spectrum (FFT of the whole signal)")
     ax.set_xlabel("Frequency (Hz)")
-    ax.set_ylabel("Magnitude")
-    ax.set_xlim(0, sr / 2)  # Nyquist
+    ax.set_ylabel("Amplitude (dB)")
+    ax.set_xscale("log")
+    ax.set_xlim(20, sr / 2)  # 20 Hz: log scale can't start at 0; sr/2 = Nyquist
 
 
 def plot_spectrogram(y: np.ndarray, sr: int, ax: plt.Axes) -> None:
