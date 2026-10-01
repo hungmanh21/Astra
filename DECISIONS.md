@@ -33,3 +33,16 @@
 ## 2026-09-30: Acceptance test for ASR is an offline script with a fixture clip
 - Reason: repeatable and needs no browser; the reference transcript allows manual comparison
 - Rejected alternative: UI-only checks, WER pass/fail threshold in v0
+
+## 2026-09-30: Whisper only for now; NeMo adapters deferred
+- Reason: dev hardware is now an RTX 3060 (12 GB), not the H100 the SPEC assumed; NeMo compatibility work (Python version, PyTorch pins) is not needed until the Parakeet and Nemotron adapters (M4)
+- Constraint: the "all three models plus local vLLM resident" plan does not fit 12 GB; revisit at M4. Gemini is the practical LLM until then
+
+## 2026-09-30: Frontend built first, against a protocol mock
+- Reason: the WebSocket protocol in SPEC 6.3 is the contract, so the UI (and the browser-specific audio risk) can be built and verified before the backend exists
+- Rejected alternative: mock inside the frontend JS (cannot verify audio bytes arrive intact), separate dev server or Vite build (contradicts the no-build-step decision)
+- Constraint: `frontend/` shares no code with `backend/`; the WebSocket URL defaults to same-origin and can be overridden with `?ws=`. `scripts/mock_server.py` is throwaway and is deleted once `backend/main.py` replaces it
+
+## 2026-09-30: Server rejects turns shorter than 0.25 s
+- Reason: push-to-talk taps would otherwise send empty or near-empty audio to ASR; the client has already sent `start_turn` by then, so the server is the one to reject
+- Constraint: added to SPEC 6.3.1

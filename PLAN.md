@@ -6,6 +6,8 @@
 
 How to read this: milestones (M0-M5) match SPEC section 9. Each task is small enough to finish and check in one sitting. Every task has a **Done when** line, and that line is how you know it is finished. `FR-n` and `AC` refer to SPEC section 5 (requirements) and section 8 (acceptance criteria). Tasks within a milestone run in order unless a task says otherwise.
 
+**Current order:** frontend first (T1.1, T1.9, T1.10 plus a protocol mock), then the M1 backend tasks. Whisper is the only ASR for now; NeMo adapters (Parakeet, Nemotron) and their environment work (T0.3 for those models, T0.4, T4.1, T4.2) are deferred. Dev hardware is an RTX 3060 (12 GB), not the H100 the SPEC first assumed.
+
 ## Decisions to make along the way
 
 | Decision | Made in | Notes |
@@ -38,7 +40,7 @@ Goal: prove the dependency stack works together before writing any app code. Thi
 
 Goal: audio recorded in the browser reaches the server intact. No ASR or LLM yet. Covers FR-2, FR-3, FR-12 (UI side).
 
-- [ ] **T1.1 Project scaffold.** Create `backend/`, `frontend/`, `scripts/`, `tests/fixtures/`, `config.yaml`, `.env.example`, matching SPEC 6.6. Add `.env` to `.gitignore`.
+- [~] **T1.1 Project scaffold.** (`frontend/` and `scripts/` exist; `backend/`, `tests/`, `config.yaml`, `.env.example` come with the backend tasks.) Create `backend/`, `frontend/`, `scripts/`, `tests/fixtures/`, `config.yaml`, `.env.example`, matching SPEC 6.6. Add `.env` to `.gitignore`.
   Done when: the folders exist and `.env` is ignored.
 - [ ] **T1.2 Config loader.** `backend/config.py`: load `.env` and `config.yaml` into a typed settings object (ASR model registry entries, default ASR model, LLM settings, system prompt, `DEBUG_SAVE_AUDIO` flag, max turn seconds = 30).
   Done when: a unit test loads a sample config and reads each field.
@@ -54,11 +56,11 @@ Goal: audio recorded in the browser reaches the server intact. No ASR or LLM yet
   Done when: unit tests cover a good buffer, empty, odd length, and too long.
 - [ ] **T1.8 Turn handling for audio only.** Handle `start_turn` (send `turn_started`), audio frames, and `end_turn`. With `DEBUG_SAVE_AUDIO` on, write the turn to a WAV file. Otherwise audio stays in memory (privacy NFR).
   Done when: a test client sending a known PCM16 buffer produces a matching WAV in debug mode and no file when the flag is off.
-- [ ] **T1.9 Recorder worklet.** `frontend/recorder-worklet.js`: capture the mic through `AudioWorklet`, resample to 16 kHz mono where the `AudioContext` does not run at 16 kHz, convert to PCM16, and post 20-100 ms frames.
+- [x] **T1.9 Recorder worklet.** (Verified in a browser against `scripts/mock_server.py`; logic also covered by stubbed Node tests.) `frontend/recorder-worklet.js`: capture the mic through `AudioWorklet`, resample to 16 kHz mono where the `AudioContext` does not run at 16 kHz, convert to PCM16, and post 20-100 ms frames.
   Done when: logged frame sizes and sample rate are correct in Chrome.
-- [ ] **T1.10 Chat UI shell and push-to-talk.** `frontend/index.html` and `app.js`: scrolling conversation, hold-to-record mic button (press to start, release to stop), WebSocket client, auto-stop at 30 s (FR-1, FR-2, FR-12).
+- [x] **T1.10 Chat UI shell and push-to-talk.** (Verified in a browser against the mock. Also implements the transcript review UI (T4.7), streamed reply, timings display (T5.2) and reconnect ahead of schedule, tested against `scripts/mock_server.py`.) `frontend/index.html` and `app.js`: scrolling conversation, hold-to-record mic button (press to start, release to stop), WebSocket client, auto-stop at 30 s (FR-1, FR-2, FR-12).
   Done when: holding the button sends `start_turn`, frames, `end_turn`, and a 30 s hold stops on its own.
-- [ ] **T1.11 M1 end-to-end check.** In Chrome, record a sentence with debug saving on and play back the WAV. Repeat once in Safari, since Safari's sample-rate handling differs.
+- [~] **T1.11 M1 end-to-end check.** (Run against the mock and reported working by the user; Safari result not recorded, so this stays open until it is. Run it against `scripts/mock_server.py`, which saves the received audio as a WAV.) In Chrome, record a sentence with debug saving on and play back the WAV. Repeat once in Safari, since Safari's sample-rate handling differs.
   Done when: the WAV sounds correct at the right speed and pitch in both browsers.
 
 ---

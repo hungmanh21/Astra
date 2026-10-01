@@ -130,7 +130,7 @@ Turn lifecycle: `start_turn` → audio frames → `end_turn` → `transcript` �
 
 ### 6.3.1 Audio format contract
 
-16 kHz, mono, signed 16-bit little-endian PCM. Frames of 20-100 ms. The server concatenates frames until `end_turn`, then hands a single float32 array (values in [-1, 1]) to the ASR. The server rejects a turn with an `error` if it is empty, has an odd byte count, or exceeds 30 s.
+16 kHz, mono, signed 16-bit little-endian PCM. Frames of 20-100 ms. The server concatenates frames until `end_turn`, then hands a single float32 array (values in [-1, 1]) to the ASR. The server rejects a turn with an `error` if it is shorter than 0.25 s (this includes empty, and covers an accidental tap of the mic button), has an odd byte count, or exceeds 30 s.
 
 The browser does the resampling. `AudioContext` is created at 16 kHz where the browser honors it; where it does not (Safari may run at the device rate), the worklet resamples to 16 kHz itself.
 
@@ -208,11 +208,14 @@ astra/
       nemotron.py
     llm.py             # LiteLLM wrapper
     config.py
-  frontend/            # served as static files, no build step
+  frontend/            # served as static files, no build step; no shared code with backend/
     index.html
-    app.js             # chat UI, ws client
-    recorder-worklet.js
+    style.css
+    app.js             # chat UI, ws client, turn state
+    recorder.js        # mic + AudioWorklet wrapper (main thread)
+    recorder-worklet.js  # resample to 16 kHz, PCM16 framing (audio thread)
   scripts/
+    mock_server.py     # throwaway protocol mock for frontend development
     compare_asr.py     # runs every registered adapter on a WAV fixture
   tests/
     fixtures/          # 10 s English clip + reference transcript
@@ -243,7 +246,7 @@ astra/
 
 ## 7. Constraints & Assumptions
 
-- Single developer, Python end to end, one machine with 1x NVIDIA H100 (80 GB) shared by the ASR models and, optionally, a local vLLM server.
+- Single developer, Python end to end. Current dev machine: 1x NVIDIA RTX 3060 (12 GB), WSL2. Whisper large-v3 is the focus for now (fp16, roughly 3-4 GB). The earlier plan of keeping all three ASR models plus a local vLLM server resident assumed an H100 (80 GB) and does not hold on 12 GB; revisit when the NeMo adapters (M4) land. Until then the Gemini API is the practical LLM.
 - English only for v0: language is fixed to `en` in all ASR adapters.
 - v0 prioritizes development speed over efficiency.
 - The user's browser can access the mic (`localhost`).

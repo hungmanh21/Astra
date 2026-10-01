@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Astra</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Astra</h1>
+    <span id="status" class="status" data-state="connecting">connecting…</span>
+    <div class="controls">
+      <label>ASR model <select id="model" disabled></select></label>
+      <label class="check"><input type="checkbox" id="review"> Review transcript</label>
+      <button id="reset" type="button" disabled>Reset</button>
+    </div>
+  </header>
+
+  <main id="chat" aria-live="polite"></main>
+
+  <footer>
+    <p id="hint"></p>
+    <button id="mic" type="button" disabled>Enable microphone</button>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
