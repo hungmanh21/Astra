@@ -14,3 +14,27 @@ dependencies = [
     "transformers>=5.17.0",
     "uvicorn[standard]>=0.54.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.9",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["theory"]  # learning notes, not part of the app
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # import sorting
+    "UP",     # modern syntax for the target Python version
+    "B",      # likely bugs
+    "ASYNC",  # blocking calls inside async code
+]

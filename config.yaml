@@ -1,0 +1,12 @@
+# Model registry and defaults (SPEC 6.2). Secrets live in .env, never here.
+# The loader (PLAN T1.2) turns each `asr.models` entry into an ASRModelConfig.
+
+asr:
+  default_model: whisper-large-v3
+  models:
+    whisper-large-v3:
+      adapter: backend.asr.whisper.WhisperASR
+      model_id: openai/whisper-large-v3
+      options:
+        device: auto
+        dtype: float16

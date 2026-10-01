@@ -1,12 +1,11 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 70fcd3b (Add v0 SPEC, PLAN, and project workflow docs), before the frontend commit that follows it; see `git log -1` for the newest
-- Test status: no automated tests in the repo yet (JS logic was checked with throwaway Node scripts, not committed)
-- Lint: not configured yet
-- Note: `make check` does not exist yet (no Makefile)
+- Latest commit: 88c03b4 (Add push-to-talk frontend and protocol mock server), before the backend stubs and lint commit that follows it; see `git log -1` for the newest
+- Test status: 17 pytest stubs, all skipped (nothing implemented yet); JS logic was checked with throwaway Node scripts, not committed
+- Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, GPU visible via `nvidia-smi`. Torch CUDA not yet verified from Python.
-- Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]` (plus the original audio libs)
+- Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]` (plus the original audio libs); dev: `pytest`, `ruff`
 
 ## Completed
 - [x] Project scaffold: README, uv project, `.gitignore`
@@ -25,12 +24,10 @@
 - The mic stays open (browser mic indicator on) after first enabling it, to avoid clipping the start of speech
 - Python 3.13 vs NeMo compatibility unchecked (deferred; Whisper only for now)
 - Default Gemini model name not chosen yet (T3.1)
-- `make check` referenced in `CLAUDE.md` does not exist yet
 - `CLAUDE.md` still says the target hardware is an H100; the dev machine is an RTX 3060 (see DECISIONS.md)
 
 ## Next Steps
 1. Record the Safari result for T1.11 (or note it as skipped)
 2. Verify torch sees the GPU: `uv run python -c "import torch; print(torch.cuda.is_available())"`
 3. M1 backend: config loader (T1.2), protocol models (T1.4), transport interface (T1.5), session and audio validation (T1.6-T1.8), replacing the mock with `backend/main.py` (T1.3)
-4. Create a Makefile with a `check` target (lint + tests) early in M1
-5. Then M2: ASR interface, registry and the Whisper adapter
+4. Then M2: ASR interface, registry and the Whisper adapter

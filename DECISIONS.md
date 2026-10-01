@@ -46,3 +46,7 @@
 ## 2026-09-30: Server rejects turns shorter than 0.25 s
 - Reason: push-to-talk taps would otherwise send empty or near-empty audio to ASR; the client has already sent `start_turn` by then, so the server is the one to reject
 - Constraint: added to SPEC 6.3.1
+
+## 2026-10-01: Ruff for lint and format, wired into `make check`
+- Reason: one fast tool for both linting and formatting; `make check` is what the session workflow in CLAUDE.md runs
+- Constraint: rules E, F, I, UP, B, ASYNC; line length 100; `theory/` excluded (learning notes). Python only, so `frontend/` has no linter yet

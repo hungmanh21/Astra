@@ -42,7 +42,9 @@ class Turn:
         self.model = model
         self.review = review
         self.pcm = bytearray()
-        self.decision: asyncio.Future[str | None] | None = None  # review mode: text, or None = discard
+        self.decision: asyncio.Future[str | None] | None = (
+            None  # review mode: text, or None = discard
+        )
 
 
 class Session:
@@ -154,7 +156,9 @@ class Session:
                 await asyncio.sleep(0.06)
                 if ttft_ms is None:
                     ttft_ms = (time.perf_counter() - t1) * 1000
-                await self.ws.send_json({"type": "llm_delta", "turn_id": turn.id, "text": word + " "})
+                await self.ws.send_json(
+                    {"type": "llm_delta", "turn_id": turn.id, "text": word + " "}
+                )
             llm_ms = (time.perf_counter() - t1) * 1000
             await self.ws.send_json(
                 {

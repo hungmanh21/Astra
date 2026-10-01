@@ -149,9 +149,12 @@ All durations in milliseconds, measured on the server with a monotonic clock, ex
 ```python
 class ASRModel(Protocol):
     name: str
+
     def load(self) -> None: ...
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000,
-                   language: str | None = None) -> TranscriptResult: ...
+    def transcribe(
+        self, audio: np.ndarray, sample_rate: int = 16000, language: str | None = None
+    ) -> TranscriptResult: ...
+
 
 @dataclass
 class TranscriptResult:

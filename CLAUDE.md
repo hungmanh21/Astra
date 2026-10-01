@@ -18,7 +18,7 @@ Python project managed with `uv` (`pyproject.toml`, `uv.lock`, `.python-version`
 
 - Install: `uv sync`
 - Run a script: `uv run <path/to/script.py>` (for example `uv run theory/fundamentals/examples/audio_representations.py`)
-- Consistency check: `make check`. There is no Makefile yet. It should be created early in M1 (lint + tests, once they exist), and this line updated when it is.
+- Consistency check: `make check` (Ruff lint, Ruff format check, then pytest). `make fmt` auto-fixes lint issues and formats. Ruff is configured in `pyproject.toml` (line length 100, `theory/` excluded) and covers Python only, not `frontend/`.
 
 Target hardware for v0 is Linux (WSL2 is fine) with one NVIDIA H100. Browser and backend run on the same machine (`localhost`).
 
