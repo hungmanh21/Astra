@@ -50,3 +50,7 @@
 ## 2026-10-01: Ruff for lint and format, wired into `make check`
 - Reason: one fast tool for both linting and formatting; `make check` is what the session workflow in CLAUDE.md runs
 - Constraint: rules E, F, I, UP, B, ASYNC; line length 100; `theory/` excluded (learning notes). Python only, so `frontend/` has no linter yet
+
+## 2026-10-01: PROGRESS.md is committed together with the work
+- Reason: PROGRESS.md should describe the repo as of the commit that contains it (done, in progress, next), so it is updated before committing and goes in the same commit.
+- Constraint: a commit cannot contain its own hash, so "Latest commit" names the previous commit.

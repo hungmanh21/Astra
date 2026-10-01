@@ -20,7 +20,7 @@ Python project managed with `uv` (`pyproject.toml`, `uv.lock`, `.python-version`
 - Run a script: `uv run <path/to/script.py>` (for example `uv run theory/fundamentals/examples/audio_representations.py`)
 - Consistency check: `make check` (Ruff lint, Ruff format check, then pytest). `make fmt` auto-fixes lint issues and formats. Ruff is configured in `pyproject.toml` (line length 100, `theory/` excluded) and covers Python only, not `frontend/`.
 
-Target hardware for v0 is Linux (WSL2 is fine) with one NVIDIA H100. Browser and backend run on the same machine (`localhost`).
+Target hardware for v0 is Linux (WSL2 is fine) with one NVIDIA GPU. The dev machine is an RTX 3060 (12 GB), which fits Whisper large-v3 in fp16. Browser and backend run on the same machine (`localhost`).
 
 ## Conventions
 
@@ -43,9 +43,9 @@ Target hardware for v0 is Linux (WSL2 is fine) with one NVIDIA H100. Browser and
 4. Continue from the "Next Steps" section of `PROGRESS.md`.
 
 ### Before session end (clock out)
-1. Update `PROGRESS.md`.
+1. Update `PROGRESS.md` so it describes the repo as it will be after this commit (done, in progress, next). Set "Latest commit" to the previous commit (`git log -1 --oneline` before committing); a commit cannot contain its own hash.
 2. Run `make check` to confirm a consistent state.
-3. Commit all completed work.
+3. Commit the work and `PROGRESS.md` together in one commit.
 
 ### PROGRESS.md
 Tracks the progress of the **repo code**, not the learning notes. Keep this structure:

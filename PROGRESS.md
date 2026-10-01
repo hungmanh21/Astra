@@ -1,11 +1,11 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 88c03b4 (Add push-to-talk frontend and protocol mock server), before the backend stubs and lint commit that follows it; see `git log -1` for the newest
-- Test status: 17 pytest stubs, all skipped (nothing implemented yet); JS logic was checked with throwaway Node scripts, not committed
+- Latest commit: f3c724e (Add ASR pipeline stubs, Ruff, and make check), the commit before the one that contains this file; see `git log -1` for the newest
+- Test status: 24 pytest tests passing (audio buffer, registry, service with a fake adapter). Whisper itself has not been run on real weights yet. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
-- Hardware: RTX 3060 (12 GB) on WSL2, GPU visible via `nvidia-smi`. Torch CUDA not yet verified from Python.
-- Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]` (plus the original audio libs); dev: `pytest`, `ruff`
+- Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
+- Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]`, `pyyaml` (plus the original audio libs); dev: `pytest`, `ruff`
 
 ## Completed
 - [x] Project scaffold: README, uv project, `.gitignore`
@@ -13,9 +13,13 @@
 - [x] `SPEC.md`, `PLAN.md`, `CLAUDE.md`, `PROGRESS.md`, `DECISIONS.md`
 - [x] Frontend (T1.9, T1.10): chat UI, push-to-talk, AudioWorklet to 16 kHz PCM16, WebSocket client, review mode, timings display, reconnect. Tried in a browser against the mock and working
 - [x] `scripts/mock_server.py`: protocol mock that saves received audio as WAV
+- [x] ASR pipeline code and tests: `backend/audio.py` (T1.7), `backend/asr/{base,registry,whisper,service}.py` (T2.1, T2.2, T2.3 code, T2.6 code), `scripts/compare_asr.py`
 - [x] Worklet and recorder logic checked with stubbed Node tests (resampling at 48k/44.1k/16k, 30 s cap, stale-message handling)
 
 ## In Progress
+- [~] T2.3 Whisper adapter: written, not run on real weights; needs the model download and a clip (T2.4)
+- [~] T2.5 `compare_asr.py`: written, not run; needs the T2.4 fixture clip
+- [~] T2.6 service: unit tested with a fake adapter; the "second WebSocket client stays responsive" check needs the session code
 - [~] T1.11 M1 end-to-end check: working against the mock; the Safari result has not been recorded
 - [~] T1.1 scaffold: `frontend/` and `scripts/` exist; `backend/`, `tests/`, `config.yaml`, `.env.example` come with the backend tasks
 
@@ -24,10 +28,11 @@
 - The mic stays open (browser mic indicator on) after first enabling it, to avoid clipping the start of speech
 - Python 3.13 vs NeMo compatibility unchecked (deferred; Whisper only for now)
 - Default Gemini model name not chosen yet (T3.1)
-- `CLAUDE.md` still says the target hardware is an H100; the dev machine is an RTX 3060 (see DECISIONS.md)
+- Whisper may emit text such as "Thank you." on silence or noise; not handled in v0, note what you see in M2
 
 ## Next Steps
 1. Record the Safari result for T1.11 (or note it as skipped)
-2. Verify torch sees the GPU: `uv run python -c "import torch; print(torch.cuda.is_available())"`
-3. M1 backend: config loader (T1.2), protocol models (T1.4), transport interface (T1.5), session and audio validation (T1.6-T1.8), replacing the mock with `backend/main.py` (T1.3)
-4. Then M2: ASR interface, registry and the Whisper adapter
+2. T2.4: add a 10 s English clip (your own voice or licensed) and its reference transcript to `tests/fixtures/`
+3. Run `uv run python scripts/compare_asr.py tests/fixtures/<clip>.wav` to check Whisper end to end (downloads about 3 GB), then tick T2.3 and T2.5
+4. M1 backend: config loader (T1.2), protocol models (T1.4), transport interface (T1.5), session (T1.6, T1.8), `backend/main.py` replacing the mock (T1.3)
+5. M2 wiring: T2.7 transcript in the turn, T2.8 M2 check

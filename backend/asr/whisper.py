@@ -4,11 +4,12 @@ Model: openai/whisper-large-v3. English only in v0. In fp16 it needs roughly
 3-4 GB, so it fits on the 12 GB RTX 3060.
 """
 
+import time
 from typing import Any
 
 import numpy as np
 
-from backend.asr.base import TranscriptResult
+from backend.asr.base import ASRError, TranscriptResult
 
 
 class WhisperASR:
@@ -19,39 +20,33 @@ class WhisperASR:
         device: str = "auto",  # "auto" | "cuda" | "cpu"
         dtype: str = "float16",
     ) -> None:
-        """TODO(you): store the settings only. No heavy imports, no weight loading.
+        import torch
 
-        Input:  name - registry key (also the `name` attribute of the ASRModel protocol).
-                model_id - Hugging Face id, "openai/whisper-large-v3".
-                device - "auto", "cuda" or "cpu".
-                dtype - "float16" or "float32" (config value, as a string).
-        Output: None.
-        State to keep: name, model_id, resolved device, resolved dtype, and a
-                       `self._pipe = None` that load() fills in.
-
-        Steps:
-          1. "auto" -> "cuda" if torch.cuda.is_available() else "cpu".
-          2. fp16 is not supported on CPU, so use float32 there.
-        """
-        raise NotImplementedError
+        self.name = name
+        self.model_id = model_id
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
+        # fp16 is not supported on CPU.
+        self.dtype = "float32" if self.device == "cpu" else dtype
+        self._pipe = None
 
     def load(self) -> None:
-        """TODO(you): build the transformers ASR pipeline and warm it up.
+        try:
+            import torch
+            from transformers import pipeline
 
-        Input:  none.
-        Output: None. Afterwards self._pipe is ready.
-        Raises: ASRError if the download or the load fails.
-
-        Steps:
-          1. Import torch/transformers inside this method so importing the module is cheap.
-          2. transformers.pipeline("automatic-speech-recognition", model=self.model_id,
-             device=..., dtype=...). Recent transformers versions use `dtype=`;
-             `torch_dtype=` is the deprecated spelling. Check the version you have.
-          3. Run one dummy transcription (about 1 s of silence, np.zeros(16000, np.float32)).
-             The first CUDA call is much slower than later ones and would otherwise be
-             counted in the first real turn's asr_ms.
-        """
-        raise NotImplementedError
+            self._pipe = pipeline(
+                "automatic-speech-recognition",
+                model=self.model_id,
+                device=self.device,
+                dtype=getattr(torch, self.dtype),
+            )
+            # The first CUDA call is much slower; keep it out of the first real turn's asr_ms.
+            self._run(np.zeros(16000, dtype=np.float32), 16000)
+        except Exception as exc:
+            self._pipe = None
+            raise ASRError(f"failed to load {self.model_id}: {exc}") from exc
 
     def transcribe(
         self,
@@ -59,33 +54,26 @@ class WhisperASR:
         sample_rate: int = 16000,
         language: str | None = None,
     ) -> TranscriptResult:
-        """TODO(you): transcribe one whole turn.
-
-        Input:  audio - 1-D float32 array in [-1, 1], mono, up to 30 s.
-                sample_rate - 16000.
-                language - ignored in v0; always force English.
-        Output: TranscriptResult(text=..., language="en", duration_s=len(audio)/sample_rate,
-                latency_ms=<inference time only>).
-        Raises: ASRError if the model was not loaded or inference fails (don't let a bare
-                RuntimeError or CUDA error escape).
-
-        Steps:
-          1. Start time.perf_counter() just before inference, stop right after (SPEC 6.3.2).
-          2. The pipeline takes {"raw": audio, "sampling_rate": sample_rate}.
-          3. Force English: generate_kwargs={"language": "en", "task": "transcribe"}.
-          4. Wrap inference in torch.inference_mode().
-          5. Strip whitespace from the text.
-          6. 30 s is Whisper's window and the turn cap, so no chunking is needed.
-
-        Gotcha: Whisper tends to invent text on silence or noise (for example "Thank you.").
-        Don't fix it yet, but write down what you see for the M2 notes in PLAN.md.
-        """
-        raise NotImplementedError
+        if self._pipe is None:
+            raise ASRError(f"{self.name} is not loaded")
+        try:
+            start = time.perf_counter()
+            out = self._run(audio, sample_rate)
+            latency_ms = (time.perf_counter() - start) * 1000.0
+        except Exception as exc:
+            raise ASRError(f"{self.name} inference failed: {exc}") from exc
+        return TranscriptResult(
+            text=out["text"].strip(),
+            language="en",
+            duration_s=len(audio) / sample_rate,
+            latency_ms=latency_ms,
+        )
 
     def _run(self, audio: np.ndarray, sample_rate: int) -> dict[str, Any]:
-        """TODO(you), optional: the raw pipeline call, shared by warm-up and transcribe().
+        import torch
 
-        Input:  audio - float32 array; sample_rate - int.
-        Output: whatever the pipeline returns, a dict like {"text": "..."}.
-        """
-        raise NotImplementedError
+        with torch.inference_mode():
+            return self._pipe(
+                {"raw": audio, "sampling_rate": sample_rate},
+                generate_kwargs={"language": "en", "task": "transcribe"},
+            )

@@ -5,11 +5,14 @@ adapter class by dotted path, so this file never needs to change and heavy
 libraries (transformers, NeMo) are only imported when a model is first used.
 """
 
+import importlib
+import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.asr.base import ASRModel
+from backend.asr.base import ASRError, ASRModel, UnknownASRModel
 
 
 @dataclass(frozen=True)
@@ -23,67 +26,46 @@ class ASRRegistry:
     """Adapter contract: `Adapter(name=<key>, model_id=<model_id>, **options)`."""
 
     def __init__(self, configs: Mapping[str, ASRModelConfig]) -> None:
-        """TODO(you): store the config and set up empty caches.
-
-        Input:  configs - registry key -> ASRModelConfig, in config order,
-                e.g. {"whisper-large-v3": ASRModelConfig(...)}.
-        Output: None.
-        State to keep:
-          - the configs (copy them),
-          - a dict of loaded models: key -> ASRModel,
-          - one threading.Lock per key (create them all here, so there is no race
-            creating locks later).
-        Don't build or load any adapter here.
-        """
-        raise NotImplementedError
+        self._configs = dict(configs)
+        self._models: dict[str, ASRModel] = {}
+        # Created up front so two threads never race to create the same lock.
+        self._locks = {name: threading.Lock() for name in self._configs}
 
     def available(self) -> list[str]:
-        """TODO(you): the keys the UI can offer.
-
-        Input:  none.
-        Output: list[str] of registry keys, in config order. Sent in the `session` message.
-        """
-        raise NotImplementedError
+        return list(self._configs)
 
     def is_loaded(self, name: str) -> bool:
-        """TODO(you): whether this model is already resident.
-
-        Input:  name - a registry key.
-        Output: bool. False for a key that exists but is not loaded yet.
-        Raises: nothing for unknown keys; just return False.
-        """
-        raise NotImplementedError
+        return name in self._models
 
     def get(self, name: str) -> tuple[ASRModel, float]:
-        """TODO(you): return a ready-to-use model, loading it on first use.
-
-        Input:  name - a registry key.
-        Output: (model, load_ms). load_ms is how long load() took in this call,
-                or 0.0 if the model was already loaded.
-        Raises: UnknownASRModel if `name` is not in the config.
-                ASRError if _build() or load() fails (wrap other exceptions).
-
-        Must be safe to call from several threads at once: two threads asking for the
-        same unloaded model must cause ONE load() call.
-
-        Steps:
-          1. If `name` is unknown, raise UnknownASRModel.
-          2. Fast path: already loaded -> (model, 0.0).
-          3. Take the lock for this key; check again (another thread may have loaded it).
-          4. _build(name), time model.load() with time.perf_counter(), cache it, return.
-        """
-        raise NotImplementedError
+        """Return a ready model and the load time of this call (0.0 if already loaded)."""
+        if name not in self._configs:
+            raise UnknownASRModel(f"unknown ASR model: {name!r}")
+        model = self._models.get(name)
+        if model is not None:
+            return model, 0.0
+        with self._locks[name]:
+            model = self._models.get(name)
+            if model is not None:
+                return model, 0.0
+            try:
+                model = self._build(name)
+                start = time.perf_counter()
+                model.load()
+                load_ms = (time.perf_counter() - start) * 1000.0
+            except ASRError:
+                raise
+            except Exception as exc:
+                raise ASRError(f"failed to load ASR model {name!r}: {exc}") from exc
+            self._models[name] = model
+            return model, load_ms
 
     def _build(self, name: str) -> ASRModel:
-        """TODO(you): create the adapter instance without loading it.
-
-        Input:  name - a registry key that exists in the config.
-        Output: an ASRModel instance, built as Adapter(name=name, model_id=..., **options).
-        Raises: ASRError if the dotted path cannot be imported or the class is missing.
-
-        Steps:
-          1. Split config.adapter on the last "." into module path and class name.
-          2. importlib.import_module(module path), then getattr(module, class name).
-          3. Instantiate with the keyword arguments from the contract above.
-        """
-        raise NotImplementedError
+        config = self._configs[name]
+        module_path, _, class_name = config.adapter.rpartition(".")
+        try:
+            module = importlib.import_module(module_path)
+            adapter_cls = getattr(module, class_name)
+        except (ImportError, AttributeError, ValueError) as exc:
+            raise ASRError(f"cannot import adapter {config.adapter!r}: {exc}") from exc
+        return adapter_cls(name=name, model_id=config.model_id, **config.options)

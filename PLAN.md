@@ -52,7 +52,7 @@ Goal: audio recorded in the browser reaches the server intact. No ASR or LLM yet
   Done when: the session layer imports no FastAPI types.
 - [ ] **T1.6 Session skeleton.** `backend/session.py`: per-connection state (session id, history list, current turn or none). On connect, send the `session` message (session id, available models, default model).
   Done when: the browser console shows the `session` message after connecting.
-- [ ] **T1.7 Audio buffer and validation.** `backend/audio.py`: collect binary frames per turn, then produce a float32 array in [-1, 1]. Reject an empty turn, odd byte count, or over 30 s with an `error` (FR-12, SPEC 6.3.1).
+- [x] **T1.7 Audio buffer and validation.** `backend/audio.py`: collect binary frames per turn, then produce a float32 array in [-1, 1]. Reject an empty turn, odd byte count, or over 30 s with an `error` (FR-12, SPEC 6.3.1).
   Done when: unit tests cover a good buffer, empty, odd length, and too long.
 - [ ] **T1.8 Turn handling for audio only.** Handle `start_turn` (send `turn_started`), audio frames, and `end_turn`. With `DEBUG_SAVE_AUDIO` on, write the turn to a WAV file. Otherwise audio stays in memory (privacy NFR).
   Done when: a test client sending a known PCM16 buffer produces a matching WAV in debug mode and no file when the flag is off.
@@ -69,17 +69,17 @@ Goal: audio recorded in the browser reaches the server intact. No ASR or LLM yet
 
 Goal: recorded speech comes back as a transcript in the chat, using Whisper. Covers FR-4, FR-5, and the compare script.
 
-- [ ] **T2.1 ASR interface.** `backend/asr/base.py`: `ASRModel` protocol and `TranscriptResult` from SPEC 6.4.
+- [x] **T2.1 ASR interface.** `backend/asr/base.py`: `ASRModel` protocol and `TranscriptResult` from SPEC 6.4.
   Done when: type checks pass and a fake adapter satisfies the protocol in a test.
-- [ ] **T2.2 Registry.** `backend/asr/registry.py`: map config keys to adapter classes, lazy-load and cache instances, expose the list of available keys. Fixed language `en`.
+- [x] **T2.2 Registry.** `backend/asr/registry.py`: map config keys to adapter classes, lazy-load and cache instances, expose the list of available keys. Fixed language `en`.
   Done when: unit tests with a fake adapter show one `load()` call across two `get()` calls.
-- [ ] **T2.3 Whisper adapter.** `backend/asr/whisper.py`: `transformers` pipeline for `openai/whisper-large-v3`, English forced, fp16 on GPU (CPU fallback for dev).
+- [~] **T2.3 Whisper adapter.** `backend/asr/whisper.py`: `transformers` pipeline for `openai/whisper-large-v3`, English forced, fp16 on GPU (CPU fallback for dev).
   Done when: it transcribes the T0.3 test clip through the adapter interface.
 - [ ] **T2.4 Fixture clip and reference.** Add a 10 s English WAV (16 kHz mono) and its reference transcript to `tests/fixtures/`. Use a clip you own or recorded yourself, or one with a license that allows committing it.
   Done when: both files are committed.
-- [ ] **T2.5 `scripts/compare_asr.py`.** Run every registered adapter on the fixture, print transcript and `asr_ms` per model. A model that fails to load prints its error and the script continues.
+- [~] **T2.5 `scripts/compare_asr.py`.** Run every registered adapter on the fixture, print transcript and `asr_ms` per model. A model that fails to load prints its error and the script continues.
   Done when: the script runs and prints a row for Whisper (the others are added in M4).
-- [ ] **T2.6 Run ASR off the event loop.** Run `transcribe()` in a thread pool from the session. Time it per SPEC 6.3.2 (`asr_ms` excludes queueing and first-use load; log `model_load_ms` separately).
+- [~] **T2.6 Run ASR off the event loop.** Run `transcribe()` in a thread pool from the session. Time it per SPEC 6.3.2 (`asr_ms` excludes queueing and first-use load; log `model_load_ms` separately).
   Done when: a second WebSocket client stays responsive while an ASR call runs.
 - [ ] **T2.7 Wire ASR into the turn.** On `end_turn`, transcribe and send `transcript` (with `asr_ms`). Show the user's transcript in the chat.
   Done when: hold, speak, release shows the transcript in the UI.
