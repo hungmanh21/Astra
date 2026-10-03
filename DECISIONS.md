@@ -58,3 +58,8 @@
 ## 2026-10-01: Transport seam is a send-side Protocol plus a handler the transport drives
 - Reason: `Transport` (send_json, send_bytes) is what the session sends through; the transport's receive loop calls `Session.on_json` / `on_audio_frame`. Session code imports no FastAPI types, so WebRTC can replace the WebSocket later (SPEC 6.3 seam).
 - Constraint: in M1 the session answers a valid `end_turn` with an "ASR is not connected yet" error so the frontend unlocks; T2.7 replaces that with the transcription.
+
+## 2026-10-03: PROGRESS.md is updated after committing and left uncommitted
+- Reason: after each work commit, PROGRESS.md is updated to name that commit and the new state, then left modified. The uncommitted diff shows what is new since the last commit, and PROGRESS.md always names a real hash. It is committed together with the next batch of work.
+- Rejected alternative: committing PROGRESS.md in the same commit (it could only name the previous commit) or in a separate "Update PROGRESS.md" commit (noise in the history).
+- Constraint: supersedes the 2026-10-01 "PROGRESS.md is committed together with the work" entry.

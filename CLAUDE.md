@@ -39,13 +39,15 @@ Target hardware for v0 is Linux (WSL2 is fine) with one NVIDIA GPU. The dev mach
 ### At session start (clock in)
 1. Read `PROGRESS.md` for the current state.
 2. Read `DECISIONS.md` for important decisions.
-3. Run `make check` to confirm the repo is in a consistent state.
+3. Run `make check` to confirm the repo is in a consistent state. A modified `PROGRESS.md` in `git status` is expected (see clock out).
 4. Continue from the "Next Steps" section of `PROGRESS.md`.
 
 ### Before session end (clock out)
-1. Update `PROGRESS.md` so it describes the repo as it will be after this commit (done, in progress, next). Set "Latest commit" to the previous commit (`git log -1 --oneline` before committing); a commit cannot contain its own hash.
-2. Run `make check` to confirm a consistent state.
-3. Commit the work and `PROGRESS.md` together in one commit.
+1. Run `make check` to confirm a consistent state.
+2. Commit the completed work (not `PROGRESS.md`).
+3. Update `PROGRESS.md` to describe the repo as of that commit: set "Latest commit" to it (`git log -1 --oneline`), move finished items to Completed, refresh In Progress, Known Issues and Next Steps. Leave the file modified and uncommitted.
+
+`PROGRESS.md` therefore shows up in `git status` at the start of the next session. That is intended: it is the only thing changed since the last commit, and it goes into the next work commit. It is never committed on its own.
 
 ### PROGRESS.md
 Tracks the progress of the **repo code**, not the learning notes. Keep this structure:

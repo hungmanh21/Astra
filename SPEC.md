@@ -218,7 +218,6 @@ astra/
     recorder.js        # mic + AudioWorklet wrapper (main thread)
     recorder-worklet.js  # resample to 16 kHz, PCM16 framing (audio thread)
   scripts/
-    mock_server.py     # throwaway protocol mock for frontend development
     compare_asr.py     # runs every registered adapter on a WAV fixture
   tests/
     fixtures/          # 10 s English clip + reference transcript

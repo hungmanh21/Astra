@@ -50,7 +50,7 @@ Goal: audio recorded in the browser reaches the server intact. No ASR or LLM yet
   Done when: unit tests parse valid messages and reject malformed ones.
 - [x] **T1.5 Transport interface.** Define the small interface (`send_json`, `send_bytes`, `on_audio_frame`) and a WebSocket implementation of it (SPEC 6.3, WebRTC seam). Session code must only use the interface.
   Done when: the session layer imports no FastAPI types.
-- [~] **T1.6 (code and WebSocket test done; browser console check pending) Session skeleton.** `backend/session.py`: per-connection state (session id, history list, current turn or none). On connect, send the `session` message (session id, available models, default model).
+- [x] **T1.6 Session skeleton.** (Verified in Chrome: the page handles the `session` message from the real backend and the recording turn went through.) `backend/session.py`: per-connection state (session id, history list, current turn or none). On connect, send the `session` message (session id, available models, default model).
   Done when: the browser console shows the `session` message after connecting.
 - [x] **T1.7 Audio buffer and validation.** `backend/audio.py`: collect binary frames per turn, then produce a float32 array in [-1, 1]. Reject an empty turn, odd byte count, or over 30 s with an `error` (FR-12, SPEC 6.3.1).
   Done when: unit tests cover a good buffer, empty, odd length, and too long.
@@ -60,8 +60,8 @@ Goal: audio recorded in the browser reaches the server intact. No ASR or LLM yet
   Done when: logged frame sizes and sample rate are correct in Chrome.
 - [x] **T1.10 Chat UI shell and push-to-talk.** (Verified in a browser against the mock. Also implements the transcript review UI (T4.7), streamed reply, timings display (T5.2) and reconnect ahead of schedule, tested against `scripts/mock_server.py`.) `frontend/index.html` and `app.js`: scrolling conversation, hold-to-record mic button (press to start, release to stop), WebSocket client, auto-stop at 30 s (FR-1, FR-2, FR-12).
   Done when: holding the button sends `start_turn`, frames, `end_turn`, and a 30 s hold stops on its own.
-- [~] **T1.11 M1 end-to-end check.** (Run against the mock and reported working by the user; Safari result not recorded, so this stays open until it is. Run it against `scripts/mock_server.py`, which saves the received audio as a WAV.) In Chrome, record a sentence with debug saving on and play back the WAV. Repeat once in Safari, since Safari's sample-rate handling differs.
-  Done when: the WAV sounds correct at the right speed and pitch in both browsers.
+- [x] **T1.11 M1 end-to-end check.** (Chrome passed against the real backend with `DEBUG_SAVE_AUDIO=1`: the WAV sounds correct. Safari skipped on purpose: no Safari available on the dev machine. `scripts/mock_server.py` was deleted.) In Chrome, record a sentence with debug saving on and play back the WAV. Repeat once in Safari, since Safari's sample-rate handling differs.
+  Done when: the WAV sounds correct at the right speed and pitch in both browsers (Chrome only, see above).
 
 ---
 
