@@ -11,9 +11,9 @@ asr:
         device: auto
         dtype: float16
 
-# Used from M3 on. The model name is a placeholder until T3.1 picks one.
+# Used from M3 on. LiteLLM model name; the key is GEMINI_API_KEY in .env.
 llm:
-  model: gemini/TODO-pick-model
+  model: gemini/gemini-3.5-flash-lite
   api_base: null
   system_prompt: >
     You are a voice assistant. The user's words come from speech recognition, so they may

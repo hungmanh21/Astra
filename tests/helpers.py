@@ -1,6 +1,7 @@
 """Shared test helpers for the backend tests."""
 
 import asyncio
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,7 @@ def make_settings(
     max_turn_seconds: float = 30,
     models: list[str] = MODELS,
     adapter: str = "tests.test_asr_registry.FakeASR",
+    max_history_tokens: int = 1000,
 ) -> Settings:
     """Settings built by hand. Debug saving is on only when `debug_dir` is given."""
     cfg = ASRModelConfig(adapter=adapter, model_id="fake/model")
@@ -25,7 +27,10 @@ def make_settings(
         asr_models={name: cfg for name in models},
         default_asr_model=models[0],
         llm=LLMSettings(
-            model="test/model", api_base=None, system_prompt="be brief", max_history_tokens=1000
+            model="test/model",
+            api_base=None,
+            system_prompt="be brief",
+            max_history_tokens=max_history_tokens,
         ),
         max_turn_seconds=max_turn_seconds,
         debug_save_audio=debug_dir is not None,
@@ -88,3 +93,41 @@ class FakeTranscriber:
 
     def shutdown(self) -> None:
         self.shut_down = True
+
+
+class FakeLLM:
+    """Stands in for LLMClient in session tests.
+
+    `deltas` are yielded in order. `error` is raised after `error_after` deltas (0 = before the
+    first one). `gate`: an asyncio.Event awaited after the first delta, to hold a turn
+    mid-stream. `calls` records the messages of every request.
+    """
+
+    def __init__(
+        self,
+        deltas: tuple[str, ...] = ("Hi", " there"),
+        error: Exception | None = None,
+        error_after: int = 0,
+        gate: asyncio.Event | None = None,
+    ) -> None:
+        self.deltas = deltas
+        self.error = error
+        self.error_after = error_after
+        self.gate = gate
+        self.calls: list[list[dict[str, str]]] = []
+        self.cancelled = False
+
+    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
+        self.calls.append([dict(m) for m in messages])
+        try:
+            for i, delta in enumerate(self.deltas):
+                if self.error is not None and i == self.error_after:
+                    raise self.error
+                yield delta
+                if i == 0 and self.gate is not None:
+                    await self.gate.wait()
+            if self.error is not None and self.error_after >= len(self.deltas):
+                raise self.error
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise

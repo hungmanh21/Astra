@@ -92,19 +92,19 @@ Goal: recorded speech comes back as a transcript in the chat, using Whisper. Cov
 
 Goal: the transcript goes to the LLM and the reply streams into the chat, with a proper turn state machine. Covers FR-6, FR-7, FR-11, FR-13, FR-14.
 
-- [ ] **T3.1 LLM config and Gemini model choice.** Choose the default Gemini model, put it in `config.yaml` as `LLM_MODEL`, keep `GEMINI_API_KEY` in `.env` (documented in `.env.example`), and add the system prompt (short, voice-friendly answers).
+- [x] **T3.1 LLM config and Gemini model choice.** (`gemini/gemini-3.5-flash-lite`, see DECISIONS; `litellm` added; the key goes in `.env`, which is git-ignored.) Choose the default Gemini model, put it in `config.yaml` as `LLM_MODEL`, keep `GEMINI_API_KEY` in `.env` (documented in `.env.example`), and add the system prompt (short, voice-friendly answers).
   Done when: the model name and system prompt are in config and the key is not committed.
-- [ ] **T3.2 LLM wrapper.** `backend/llm.py`: async generator over `litellm.acompletion(..., stream=True)` that yields text deltas, with `api_base` optional from config.
+- [~] **T3.2 LLM wrapper.** (Code and unit tests with a fake `completion` done; the real Gemini stream is not tried yet because `litellm` is not installed in the env, see PROGRESS.) `backend/llm.py`: async generator over `litellm.acompletion(..., stream=True)` that yields text deltas, with `api_base` optional from config.
   Done when: a script streams a reply for a hard-coded prompt from Gemini.
-- [ ] **T3.3 History with token budget.** Store `{role, content}` messages in the session. Trim oldest turns when over the budget and always keep the system prompt.
+- [x] **T3.3 History with token budget.** Store `{role, content}` messages in the session. Trim oldest turns when over the budget and always keep the system prompt.
   Done when: unit tests show trimming order and that the system prompt stays.
-- [ ] **T3.4 Turn state machine.** Explicit states: idle, receiving audio, transcribing, (awaiting confirm in review mode), streaming LLM, done or failed. Reject `start_turn` while a turn is in flight with an `error` (`turn_id` null) and leave the in-flight turn alone. Reject `reset` while a turn is in flight (FR-13). A closing connection drops the in-flight turn.
+- [x] **T3.4 Turn state machine.** Explicit states: idle, receiving audio, transcribing, (awaiting confirm in review mode), streaming LLM, done or failed. Reject `start_turn` while a turn is in flight with an `error` (`turn_id` null) and leave the in-flight turn alone. Reject `reset` while a turn is in flight (FR-13). A closing connection drops the in-flight turn.
   Done when: unit tests cover every allowed and rejected transition.
-- [ ] **T3.5 Auto-send flow.** After ASR, append the transcript to history and stream `llm_delta` messages, then `llm_done` with the full text and timings (FR-6, FR-7).
+- [x] **T3.5 Auto-send flow.** After ASR, append the transcript to history and stream `llm_delta` messages, then `llm_done` with the full text and timings (FR-6, FR-7).
   Done when: a test with a fake ASR and fake LLM produces the exact message sequence `transcript`, `llm_delta`*, `llm_done`.
-- [ ] **T3.6 Failure handling.** ASR failure: add nothing to history and send `error`. LLM failure: keep the user transcript in history, add no assistant message, send `error`. The session stays usable in both cases (FR-14).
+- [x] **T3.6 Failure handling.** ASR failure: add nothing to history and send `error`. LLM failure: keep the user transcript in history, add no assistant message, send `error`. The session stays usable in both cases (FR-14).
   Done when: tests with a failing fake ASR and a failing fake LLM check history contents and that the next turn works.
-- [ ] **T3.7 `reset` message.** Clear history when idle (FR-11).
+- [x] **T3.7 `reset` message.** Clear history when idle (FR-11).
   Done when: after a reset, the next reply shows no memory of earlier turns.
 - [ ] **T3.8 UI: streamed reply, disabled mic, errors.** Append `llm_delta` text live, disable the mic while a turn is in flight (FR-13), show errors as chat messages, add a reset button.
   Done when: in the browser the reply streams in, the mic is disabled until `llm_done` or `error`, and an invalid API key shows an error and the mic recovers.

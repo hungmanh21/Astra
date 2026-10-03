@@ -13,7 +13,7 @@ import soundfile as sf
 
 from backend.asr.base import ASRError
 from backend.session import Session, TurnStage
-from tests.helpers import MODELS, FakeTranscriber, chunks, make_settings, pcm
+from tests.helpers import MODELS, FakeLLM, FakeTranscriber, chunks, make_settings, pcm
 
 
 class FakeTransport:
@@ -41,10 +41,20 @@ def start_msg(model: str = MODELS[0], review: bool = False) -> str:
 END = json.dumps({"type": "end_turn"})
 
 
-def run(scenario, transcriber: FakeTranscriber | None = None, **settings_kwargs):
+def run(
+    scenario,
+    transcriber: FakeTranscriber | None = None,
+    llm: FakeLLM | None = None,
+    **settings_kwargs,
+):
     """Run `scenario(session, transport)` on a fresh connected session."""
     transport = FakeTransport()
-    session = Session(transport, make_settings(**settings_kwargs), transcriber or FakeTranscriber())
+    session = Session(
+        transport,
+        make_settings(**settings_kwargs),
+        transcriber or FakeTranscriber(),
+        llm or FakeLLM(),
+    )
 
     async def go():
         await session.on_connect()
@@ -256,28 +266,6 @@ def test_disconnect_drops_the_in_flight_turn():
 # --- M2: ASR (T2.7) ---
 
 
-def test_end_turn_sends_transcript_then_llm_done_placeholder():
-    async def scenario(session, transport):
-        await send_turn(session, pcm(0.5))
-        await settle(session)
-        turn_id = transport.last("turn_started")["turn_id"]
-
-        assert transport.types() == ["session", "turn_started", "transcript", "llm_done"]
-        transcript = transport.last("transcript")
-        assert transcript["turn_id"] == turn_id
-        assert transcript["text"] == "hello world"
-        assert transcript["asr_ms"] == 12.5
-
-        # M2 placeholder: the UI waits for llm_done, so it gets one with no text.
-        done = transport.last("llm_done")
-        assert done["turn_id"] == turn_id
-        assert done["text"] == ""
-        assert done["timings"]["audio_s"] == 0.5
-        assert done["timings"]["asr_ms"] == 12.5
-
-    run(scenario)
-
-
 def test_transcriber_gets_the_chosen_model_and_float32_samples():
     fake = FakeTranscriber()
 
@@ -326,16 +314,6 @@ def test_end_turn_returns_before_the_asr_finishes_and_the_session_stays_responsi
 
     fake = FakeTranscriber(gate=asyncio.Event())
     run(scenario, transcriber=fake)
-
-
-def test_empty_transcript_is_sent_as_is_not_as_an_error():
-    async def scenario(session, transport):
-        await send_turn(session, pcm(0.5))
-        await settle(session)
-        assert transport.last("transcript")["text"] == ""
-        assert "error" not in transport.types()
-
-    run(scenario, transcriber=FakeTranscriber(text=""))
 
 
 def test_asr_error_sends_a_generic_error_and_the_session_recovers():
@@ -420,3 +398,226 @@ def test_debug_wav_is_still_written_with_asr_on(tmp_path):
         np.testing.assert_array_equal(samples, np.frombuffer(data, dtype="<i2"))
 
     run(scenario, debug_dir=tmp_path)
+
+
+# --- M3: LLM reply (T3.4 - T3.7) ---
+
+SYSTEM = {"role": "system", "content": "be brief"}
+
+
+def test_turn_sends_transcript_deltas_then_llm_done_with_timings():
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        turn_id = transport.last("turn_started")["turn_id"]
+
+        assert transport.types() == [
+            "session",
+            "turn_started",
+            "transcript",
+            "llm_delta",
+            "llm_delta",
+            "llm_done",
+        ]
+        assert all(m["turn_id"] == turn_id for m in transport.sent[1:])
+        transcript = transport.last("transcript")
+        assert transcript["text"] == "hello world"
+        assert transcript["asr_ms"] == 12.5
+
+        deltas = [m["text"] for m in transport.sent if m["type"] == "llm_delta"]
+        assert deltas == ["Hi", " there"]
+        done = transport.last("llm_done")
+        assert done["text"] == "Hi there"
+
+        t = done["timings"]
+        assert t["audio_s"] == 0.5
+        assert t["asr_ms"] == 12.5
+        assert t["llm_ttft_ms"] is not None and t["llm_ttft_ms"] >= 0
+        assert t["llm_total_ms"] >= t["llm_ttft_ms"]
+        assert t["e2e_ms"] >= t["llm_total_ms"]
+
+    run(scenario)
+
+
+def test_first_request_is_system_prompt_plus_the_user_transcript():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+
+    run(scenario, llm=llm)
+    assert llm.calls == [[SYSTEM, {"role": "user", "content": "hello world"}]]
+
+
+def test_history_holds_the_user_and_assistant_messages_after_a_turn():
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        assert session.history == [
+            {"role": "user", "content": "hello world"},
+            {"role": "assistant", "content": "Hi there"},
+        ]
+
+    run(scenario)
+
+
+def test_second_turn_sends_the_earlier_turns_too():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+
+    run(scenario, llm=llm)
+    assert [m["role"] for m in llm.calls[1]] == ["system", "user", "assistant", "user"]
+    assert llm.calls[1][2]["content"] == "Hi there"
+
+
+def test_reset_clears_the_history_so_the_next_request_has_no_memory():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        await session.on_json(json.dumps({"type": "reset"}))
+        assert session.history == []
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+
+    run(scenario, llm=llm)
+    assert [m["role"] for m in llm.calls[1]] == ["system", "user"]
+
+
+def test_blank_transcript_calls_no_llm_and_leaves_the_history_alone():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        assert transport.types() == ["session", "turn_started", "transcript", "llm_done"]
+        assert transport.last("transcript")["text"].strip() == ""
+        done = transport.last("llm_done")  # the UI waits for it before it unlocks
+        assert done["text"] == ""
+        assert done["timings"]["audio_s"] == 0.5
+        assert "error" not in transport.types()
+        assert session.history == []
+
+    run(scenario, transcriber=FakeTranscriber(text="  \n"), llm=llm)
+    assert llm.calls == []
+
+
+def test_asr_failure_adds_nothing_to_the_history_and_calls_no_llm():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        assert session.history == []
+        assert "llm_delta" not in transport.types()
+
+    run(scenario, transcriber=FakeTranscriber(error=ASRError("x")), llm=llm)
+    assert llm.calls == []
+
+
+def test_llm_failure_keeps_the_user_message_adds_no_reply_and_sends_a_generic_error():
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        turn_id = transport.last("turn_started")["turn_id"]
+
+        assert "transcript" in transport.types()  # ASR succeeded and was shown
+        error = transport.last("error")
+        assert error["turn_id"] == turn_id
+        assert error["message"] == "LLM request failed"
+        assert "llm_done" not in transport.types()
+        assert session.history == [{"role": "user", "content": "hello world"}]
+
+        # the session is usable and the next request still contains the failed question
+        llm.error = None
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        assert transport.types().count("llm_done") == 1
+        assert [m["role"] for m in llm.calls[1]] == ["system", "user", "user"]
+
+    llm = FakeLLM(error=RuntimeError("secret internals"))
+    run(scenario, llm=llm)
+
+
+def test_llm_failure_in_the_middle_of_the_stream_adds_no_assistant_message():
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        assert transport.types().count("llm_delta") == 1  # the part that was already sent
+        assert transport.last("error")["message"] == "LLM request failed"
+        assert "llm_done" not in transport.types()
+        assert session.history == [{"role": "user", "content": "hello world"}]
+
+    run(scenario, llm=FakeLLM(deltas=("Hi", " there"), error=RuntimeError("x"), error_after=1))
+
+
+def test_llm_error_text_never_reaches_the_user():
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        assert "secret" not in json.dumps(transport.sent)
+
+    run(scenario, llm=FakeLLM(error=RuntimeError("secret internals")))
+
+
+def test_history_is_trimmed_to_the_token_budget_oldest_first():
+    llm = FakeLLM(deltas=("x" * 400,))  # a reply of roughly 100 tokens
+
+    async def scenario(session, transport):
+        for _ in range(2):
+            await send_turn(session, pcm(0.5))
+            await settle(session)
+        # two full turns are ~210 tokens against a budget of 150: the first turn goes
+        assert [m["role"] for m in session.history] == ["user", "assistant"]
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+
+    run(scenario, llm=llm, max_history_tokens=150)
+    assert [m["role"] for m in llm.calls[2]] == ["system", "user", "assistant", "user"]
+    assert llm.calls[2][0] == SYSTEM  # the system prompt is never trimmed
+
+
+def test_start_turn_and_reset_are_rejected_while_the_reply_streams():
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await asyncio.sleep(0.05)  # first delta sent, now waiting on the gate
+        assert session.stage == TurnStage.WORKING
+        assert transport.types().count("llm_delta") == 1
+
+        await session.on_json(start_msg())
+        await session.on_json(json.dumps({"type": "reset"}))
+        errors = [m for m in transport.sent if m["type"] == "error"]
+        assert len(errors) == 2 and all(m["turn_id"] is None for m in errors)
+        assert session.history[0] == {"role": "user", "content": "hello world"}
+
+        llm.gate.set()
+        await settle(session)
+        assert transport.last("llm_done")["text"] == "Hi there"
+
+    llm = FakeLLM(gate=asyncio.Event())
+    run(scenario, llm=llm)
+
+
+def test_disconnect_while_the_reply_streams_cancels_the_llm_and_sends_nothing():
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await asyncio.sleep(0.05)
+        sent_before = len(transport.sent)
+
+        await session.on_disconnect()
+        llm.gate.set()
+        await asyncio.sleep(0.05)
+
+        assert llm.cancelled
+        assert len(transport.sent) == sent_before
+        assert session.stage == TurnStage.IDLE
+
+    llm = FakeLLM(gate=asyncio.Event())
+    run(scenario, llm=llm)

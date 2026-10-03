@@ -9,8 +9,9 @@ from fastapi.testclient import TestClient
 
 from backend.asr.base import TranscriptResult
 from backend.asr.service import TranscriptionService
+from backend.llm import LLMClient
 from backend.main import create_app
-from tests.helpers import MODELS, FakeTranscriber, chunks, make_settings, pcm
+from tests.helpers import MODELS, FakeLLM, FakeTranscriber, chunks, make_settings, pcm
 from tests.test_asr_registry import FakeASR
 
 
@@ -52,14 +53,14 @@ def send_turn(ws, data: bytes) -> str:
 
 
 def test_root_serves_the_frontend(tmp_path):
-    client = TestClient(create_app(make_settings()))
+    client = TestClient(create_app(make_settings(), llm=FakeLLM()))
     response = client.get("/")
     assert response.status_code == 200
     assert 'id="mic"' in response.text
 
 
 def test_ws_sends_session_message_on_connect():
-    client = TestClient(create_app(make_settings()))
+    client = TestClient(create_app(make_settings(), llm=FakeLLM()))
     with client.websocket_connect("/ws") as ws:
         msg = ws.receive_json()
     assert msg["type"] == "session"
@@ -68,7 +69,7 @@ def test_ws_sends_session_message_on_connect():
 
 def test_full_audio_turn_over_websocket(tmp_path):
     data = pcm(0.5)
-    client = TestClient(create_app(make_settings(debug_dir=tmp_path)))
+    client = TestClient(create_app(make_settings(debug_dir=tmp_path), llm=FakeLLM()))
     with client.websocket_connect("/ws") as ws:
         session_id = ws.receive_json()["session_id"]
         turn_id = send_turn(ws, data)
@@ -76,6 +77,9 @@ def test_full_audio_turn_over_websocket(tmp_path):
         assert reply["type"] == "transcript"
         assert reply["turn_id"] == turn_id
         assert reply["text"] == "hello world"  # from FakeASR, through the real registry/service
+        assert [ws.receive_json()["text"] for _ in range(2)] == ["Hi", " there"]
+        done = ws.receive_json()
+        assert done["type"] == "llm_done" and done["text"] == "Hi there"
 
     samples, rate = sf.read(tmp_path / f"{session_id}-{turn_id}.wav", dtype="int16")
     assert rate == 16000
@@ -84,7 +88,7 @@ def test_full_audio_turn_over_websocket(tmp_path):
 
 def test_asr_failure_reaches_the_browser_as_a_generic_error():
     FakeASR.error = RuntimeError("secret internals")
-    client = TestClient(create_app(make_settings()))
+    client = TestClient(create_app(make_settings(), llm=FakeLLM()))
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
         turn_id = send_turn(ws, pcm(0.5))
@@ -95,6 +99,7 @@ def test_asr_failure_reaches_the_browser_as_a_generic_error():
 def test_create_app_builds_a_lazy_transcriber_from_settings():
     app = create_app(make_settings())
     assert isinstance(app.state.transcriber, TranscriptionService)
+    assert isinstance(app.state.llm, LLMClient)
     client = TestClient(app)
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -103,7 +108,7 @@ def test_create_app_builds_a_lazy_transcriber_from_settings():
 
 def test_create_app_uses_the_transcriber_it_is_given():
     fake = FakeTranscriber(text="injected")
-    client = TestClient(create_app(make_settings(), transcriber=fake))
+    client = TestClient(create_app(make_settings(), transcriber=fake, llm=FakeLLM()))
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
         send_turn(ws, pcm(0.5))
@@ -113,13 +118,13 @@ def test_create_app_uses_the_transcriber_it_is_given():
 
 def test_transcriber_is_shut_down_when_the_app_stops():
     fake = FakeTranscriber()
-    with TestClient(create_app(make_settings(), transcriber=fake)):
+    with TestClient(create_app(make_settings(), transcriber=fake, llm=FakeLLM())):
         assert not fake.shut_down
     assert fake.shut_down
 
 
 def test_second_client_stays_responsive_while_an_asr_call_runs():
-    app = create_app(make_settings(adapter="tests.test_main.BlockingASR"))
+    app = create_app(make_settings(adapter="tests.test_main.BlockingASR"), llm=FakeLLM())
     # Safety valve: if the event loop is blocked, the ASR gets released after 5 s so the
     # test fails on the check below instead of hanging.
     valve = threading.Timer(5, BlockingASR.release.set)
@@ -141,3 +146,26 @@ def test_second_client_stays_responsive_while_an_asr_call_runs():
                 assert a.receive_json()["text"] == "done"
     finally:
         valve.cancel()
+
+
+def test_llm_failure_reaches_the_browser_after_the_transcript():
+    llm = FakeLLM(error=RuntimeError("secret internals"))
+    client = TestClient(create_app(make_settings(), llm=llm))
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        turn_id = send_turn(ws, pcm(0.5))
+        assert ws.receive_json()["type"] == "transcript"
+        reply = ws.receive_json()
+    assert reply == {"type": "error", "turn_id": turn_id, "message": "LLM request failed"}
+
+
+def test_conversation_history_lives_per_connection():
+    llm = FakeLLM()
+    with TestClient(create_app(make_settings(), llm=llm)) as client:
+        for _ in range(2):  # two connections, one turn each: neither sees the other's history
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()
+                send_turn(ws, pcm(0.5))
+                while ws.receive_json()["type"] != "llm_done":
+                    pass
+    assert [len(call) for call in llm.calls] == [2, 2]  # system + user, both times

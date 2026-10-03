@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.142.2",
     "librosa>=1.0.0",
+    "litellm>=1.103.2",
     "matplotlib>=3.11.2",
     "numpy>=2.5.3",
     "pydantic>=2.13.5",

@@ -4,25 +4,30 @@ One Session per WebSocket connection. It talks to the client only through a `Tra
 (see transport.py) and imports no FastAPI types.
 
 M1 scope: session message, start_turn, audio frames, end_turn with validation and the
-debug WAV. M2 adds ASR (PLAN T2.6, T2.7). Review mode and the LLM come in M3-M4.
+debug WAV. M2 adds ASR (PLAN T2.6, T2.7). M3 adds the LLM reply (T3.4-T3.7). Review mode
+comes in M4.
 """
 
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 
 import numpy as np
 
-from backend.asr.service import TranscriptionService
+from backend.asr.service import Transcription, TranscriptionService
 from backend.audio import AudioError, TurnAudioBuffer
 from backend.config import Settings
+from backend.history import build_messages, trim_history
+from backend.llm import LLMClient
 from backend.protocol import (
     ConfirmTurn,
     DiscardTurn,
     EndTurn,
     ErrorMessage,
+    LlmDelta,
     LlmDone,
     ProtocolError,
     Reset,
@@ -52,16 +57,21 @@ class Turn:
     asr_model: str
     review: bool
     audio: TurnAudioBuffer
-    # M3: add the perf_counter() taken at end_turn, for e2e_ms (SPEC 6.3.2).
+    ended_at: float = 0.0  # time.perf_counter() at end_turn, for e2e_ms (SPEC 6.3.2)
 
 
 class Session:
     def __init__(
-        self, transport: Transport, settings: Settings, transcriber: TranscriptionService
+        self,
+        transport: Transport,
+        settings: Settings,
+        transcriber: TranscriptionService,
+        llm: LLMClient,
     ) -> None:
         self._transport = transport
         self._settings = settings
         self._transcriber = transcriber
+        self._llm = llm
         # The running ASR job of the current turn. Kept so on_disconnect can cancel it.
         self._task: asyncio.Task[None] | None = None
         self.id = uuid.uuid4().hex[:8]
@@ -157,33 +167,84 @@ class Session:
 
         # Background task: the handler returns at once, so the receive loop stays free to
         # reject a start_turn or reset while the ASR runs.
+        turn.ended_at = time.perf_counter()
         self.stage = TurnStage.WORKING
         self._task = asyncio.create_task(self._run_turn(turn, samples))
 
     async def _run_turn(self, turn: Turn, samples: np.ndarray) -> None:
-        """Transcribe one turn and answer the browser. Runs as a background task."""
+        """Transcribe one turn, then stream the LLM reply. Runs as a background task."""
         try:
-            result = await self._transcriber.transcribe(turn.asr_model, samples)
+            try:
+                result = await self._transcriber.transcribe(turn.asr_model, samples)
+            except Exception:
+                # Catch everything: a task that dies silently leaves the stage stuck on
+                # WORKING. The message is fixed on purpose, ASR error text can hold internals.
+                log.exception("transcription failed for turn %s", turn.id)
+                await self._error("transcription failed", turn.id)
+                return
+
             if result.model_load_ms > 0:
                 log.info(
                     "first use of model %s: load time %.1f ms", turn.asr_model, result.model_load_ms
                 )
             await self._send(Transcript(turn_id=turn.id, text=result.text, asr_ms=result.asr_ms))
-            # M2 placeholder, replaced by the LLM call in M3: the UI waits for llm_done.
-            await self._send(
-                LlmDone(
-                    turn_id=turn.id,
-                    text="",
-                    timings=Timings(audio_s=result.audio_s, asr_ms=result.asr_ms),
+
+            if result.text.strip() == "":
+                # Nothing to ask the model; llm_done is what unlocks the UI.
+                await self._send(
+                    LlmDone(
+                        turn_id=turn.id,
+                        text="",
+                        timings=Timings(audio_s=result.audio_s, asr_ms=result.asr_ms),
+                    )
                 )
-            )
-        except Exception:
-            # Catch everything: a task that dies silently leaves the stage stuck on WORKING.
-            # The message is fixed on purpose, ASR error text can contain internals.
-            log.exception("transcription failed for turn %s", turn.id)
-            await self._error("transcription failed", turn.id)
+                return
+
+            await self._reply(turn, result, result.text)
         finally:
             self._finish_turn()
+
+    async def _reply(self, turn: Turn, result: Transcription, text: str) -> None:
+        # `text` is the transcript, or the edited one in review mode. The user message stays
+        # in the history even if the LLM fails (FR-14).
+        self.history.append({"role": "user", "content": text})
+        max_tokens = self._settings.llm.max_history_tokens
+        trim_history(self.history, max_tokens)
+        messages = build_messages(self._settings.llm.system_prompt, self.history)
+
+        start = time.perf_counter()
+        first: float | None = None
+        last = start
+        deltas: list[str] = []
+        try:
+            async for delta in self._llm.stream(messages):
+                last = time.perf_counter()
+                if first is None:
+                    first = last
+                deltas.append(delta)
+                await self._send(LlmDelta(turn_id=turn.id, text=delta))
+        except Exception:
+            log.exception("LLM request failed for turn %s", turn.id)
+            await self._error("LLM request failed", turn.id)
+            return
+
+        reply = "".join(deltas)
+        if reply:  # an empty assistant message would be rejected by some providers
+            self.history.append({"role": "assistant", "content": reply})
+            trim_history(self.history, max_tokens)
+        await self._send(
+            LlmDone(
+                turn_id=turn.id,
+                text=reply,
+                timings=Timings(
+                    audio_s=result.audio_s,
+                    asr_ms=result.asr_ms,
+                    llm_ttft_ms=None if first is None else (first - start) * 1000,
+                    llm_total_ms=(last - start) * 1000,
+                    e2e_ms=(last - turn.ended_at) * 1000,
+                ),
+            )
+        )
 
     async def _on_reset(self) -> None:
         if self.stage != TurnStage.IDLE:
@@ -192,7 +253,7 @@ class Session:
         self.history.clear()
 
     async def _on_review_decision(self, msg: ConfirmTurn | DiscardTurn) -> None:
-        # M4 (T4.7) implements review mode; until then nothing can be waiting.
+        # M4 (T4.6) implements review mode; until then nothing can be waiting.
         await self._error("no transcript is waiting for review", msg.turn_id)
 
     # --- helpers ---

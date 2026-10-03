@@ -63,3 +63,13 @@
 - Reason: after each work commit, PROGRESS.md is updated to name that commit and the new state, then left modified. The uncommitted diff shows what is new since the last commit, and PROGRESS.md always names a real hash. It is committed together with the next batch of work.
 - Rejected alternative: committing PROGRESS.md in the same commit (it could only name the previous commit) or in a separate "Update PROGRESS.md" commit (noise in the history).
 - Constraint: supersedes the 2026-10-01 "PROGRESS.md is committed together with the work" entry.
+
+## 2026-10-03: Default LLM is gemini/gemini-3.5-flash-lite
+- Reason: cheapest and fastest of the current Gemini line, which suits short voice answers. It is a config value (`llm.model`, overridable with `LLM_MODEL`), never hard-coded. The key is `GEMINI_API_KEY` in `.env`.
+- Rejected alternative: `gemini-2.5-flash` (Google lists the 2.5 series for shutdown on 2026-10-16); `gemini-3.5-flash` (slower, costlier, answers are one to three sentences anyway).
+- Constraint: the exact model ID is checked for the first time in T3.2 against the real API. If it is wrong, change `config.yaml` only.
+
+## 2026-10-03: M3 history is trimmed by an estimate, and one WORKING stage covers ASR and LLM
+- Reason: the history budget is a safety net, so `estimate_tokens` (about 4 characters per token) is enough and avoids a tokenizer download. The session keeps one `WORKING` stage from `end_turn` until `llm_done` or `error`; the PLAN T3.4 list of finer states (transcribing, streaming) adds nothing the client can observe.
+- Rejected alternative: `litellm.token_counter` (model-specific and may fetch tokenizer files).
+- Constraint: trimming drops the oldest messages first, never the newest, and the history always starts with a user message. A failed LLM turn keeps its user message, so two user messages in a row are normal.

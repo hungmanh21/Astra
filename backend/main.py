@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.asr.registry import ASRRegistry
 from backend.asr.service import TranscriptionService
 from backend.config import Settings, load_settings
+from backend.llm import LLMClient
 from backend.session import Session
 from backend.transport import WebSocketTransport
 
@@ -23,15 +24,20 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 
 def create_app(
-    settings: Settings | None = None, transcriber: TranscriptionService | None = None
+    settings: Settings | None = None,
+    transcriber: TranscriptionService | None = None,
+    llm: LLMClient | None = None,
 ) -> FastAPI:
-    """Build the app. A factory, so tests can pass their own Settings and transcriber."""
+    """Build the app. A factory, so tests can pass their own Settings, transcriber and LLM."""
     settings = settings or load_settings()
 
     # Models stay lazy: nothing is loaded here, the first turn on a model loads it.
     if transcriber is None:
         registry = ASRRegistry(settings.asr_models)
         transcriber = TranscriptionService(registry)
+
+    if llm is None:
+        llm = LLMClient(settings.llm)
 
     # Stops the ASR worker thread when the server stops.
     @asynccontextmanager
@@ -42,12 +48,13 @@ def create_app(
     app = FastAPI(lifespan=lifespan)
     app.state.settings = settings
     app.state.transcriber = transcriber
+    app.state.llm = llm
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
         await ws.accept()
         transport = WebSocketTransport(ws)
-        await transport.run(Session(transport, settings, transcriber))
+        await transport.run(Session(transport, settings, transcriber, llm))
 
     # Mounted last so it does not shadow /ws.
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
