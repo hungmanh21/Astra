@@ -1,7 +1,7 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 3ea6b14 (Add M3 LLM loop: Gemini config, LiteLLM streaming, history, auto-send flow)
+- Latest commit: eb1534c Add review mode on the server: confirm and discard a transcript before the LLM
 - Test status: 146 pytest tests passing (audio, history, LLM wrapper, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
@@ -16,7 +16,8 @@
 - [x] M1 backend scaffold (stubs with TODO blocks for you to implement): `backend/{config,protocol,transport,session,main}.py`, `config.yaml` llm/limits/debug sections, `.env.example`, `make run`, test stubs. `.env` and `debug_audio/` are git-ignored
 - [x] M1 end-to-end (T1.11): `make run` with `DEBUG_SAVE_AUDIO=1`, Chrome recording saved as a WAV that sounds correct; `scripts/mock_server.py` deleted
 - [x] T2.3, T2.4, T2.5 verified: LibriSpeech clip in `tests/fixtures/` (CC BY 4.0, see its README); `compare_asr.py` on `whisper-large-v3` gave the reference text apart from case and punctuation, `asr_ms` 1603 for 9.9 s of audio (fp16, RTX 3060, warm model). The weights (about 3 GB) are now in `~/.cache/huggingface`
-- [x] T4.6 review mode on the server (uncommitted): `TurnStage.AWAITING_CONFIRM`, confirm (edited text goes to the LLM and the history), discard, wrong id and blank text handling, think time excluded from `e2e_ms`. Frontend side (T4.7) was already built
+- [x] `scripts/try_llm.py` (uncommitted): streams one reply through `LLMClient` with the configured model, or lists the Gemini model ids the key can use; written for the T3.2 check, not yet run
+- [x] T4.6 review mode on the server: `TurnStage.AWAITING_CONFIRM`, confirm (edited text goes to the LLM and the history), discard, wrong id and blank text handling, think time excluded from `e2e_ms`. Frontend side (T4.7) was already built
 - [x] M3 (T3.1 to T3.7): `gemini/gemini-3.5-flash-lite` in config, `backend/llm.py` (LiteLLM streaming, lazy import), `backend/history.py` (token-budget trimming), auto-send flow with five timings, failure handling per FR-14, `reset`; `tests/conftest.py` fails a hung test after 20 s. Not yet tried against real Gemini (T3.2, T3.8, T3.9 wait for `litellm`)
 - [x] M2 wiring (T2.6, T2.7): `create_app` builds the registry and `TranscriptionService` (lazy models, shut down with the app); `Session` transcribes on `end_turn` in a background task (`TurnStage.WORKING`), sends `transcript` then an empty `llm_done` placeholder until M3, cancels the job on disconnect; generic "transcription failed" error
 - [x] Worklet and recorder logic checked with stubbed Node tests (resampling at 48k/44.1k/16k, 30 s cap, stale-message handling)
@@ -39,7 +40,7 @@
 - Whisper may emit text such as "Thank you." on silence or noise; not handled in v0, note what you see in M2
 
 ## Next Steps
-1. When bandwidth allows: `uv sync` (installs `litellm`), then stream a real reply from Gemini with a small script (T3.2), then T3.8 and T3.9 in Chrome with `make run`
+1. `litellm` is installed. Run `uv run python scripts/try_llm.py --list-models`, then `uv run python scripts/try_llm.py` (T3.2, confirms the model ID in `config.yaml`), then T3.8 and T3.9 in Chrome with `make run`
 2. T4.7 and T4.4/T4.5 are mostly built already on the frontend; check them in Chrome with `UV_NO_SYNC=1 make run` using review mode (the LLM step needs `litellm`, but the review box and Discard work without it)
 3. Switch `compare_asr.py` to `load_settings` (T1.2) and shorten `ProtocolError` messages
 4. M4 NeMo adapters (T4.1, T4.2) need the NeMo install, which is also a big download

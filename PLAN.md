@@ -94,7 +94,7 @@ Goal: the transcript goes to the LLM and the reply streams into the chat, with a
 
 - [x] **T3.1 LLM config and Gemini model choice.** (`gemini/gemini-3.5-flash-lite`, see DECISIONS; `litellm` added; the key goes in `.env`, which is git-ignored.) Choose the default Gemini model, put it in `config.yaml` as `LLM_MODEL`, keep `GEMINI_API_KEY` in `.env` (documented in `.env.example`), and add the system prompt (short, voice-friendly answers).
   Done when: the model name and system prompt are in config and the key is not committed.
-- [~] **T3.2 LLM wrapper.** (Code and unit tests with a fake `completion` done; the real Gemini stream is not tried yet because `litellm` is not installed in the env, see PROGRESS.) `backend/llm.py`: async generator over `litellm.acompletion(..., stream=True)` that yields text deltas, with `api_base` optional from config.
+- [x] **T3.2 LLM wrapper.** (Real Gemini stream confirmed with `scripts/try_llm.py` and a full Whisper + Gemini run; model `gemini/gemini-3.5-flash-lite` exists.) `backend/llm.py`: async generator over `litellm.acompletion(..., stream=True)` that yields text deltas, with `api_base` optional from config.
   Done when: a script streams a reply for a hard-coded prompt from Gemini.
 - [x] **T3.3 History with token budget.** Store `{role, content}` messages in the session. Trim oldest turns when over the budget and always keep the system prompt.
   Done when: unit tests show trimming order and that the system prompt stays.
