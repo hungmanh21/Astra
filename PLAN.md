@@ -73,11 +73,11 @@ Goal: recorded speech comes back as a transcript in the chat, using Whisper. Cov
   Done when: type checks pass and a fake adapter satisfies the protocol in a test.
 - [x] **T2.2 Registry.** `backend/asr/registry.py`: map config keys to adapter classes, lazy-load and cache instances, expose the list of available keys. Fixed language `en`.
   Done when: unit tests with a fake adapter show one `load()` call across two `get()` calls.
-- [~] **T2.3 Whisper adapter.** `backend/asr/whisper.py`: `transformers` pipeline for `openai/whisper-large-v3`, English forced, fp16 on GPU (CPU fallback for dev).
-  Done when: it transcribes the T0.3 test clip through the adapter interface.
-- [ ] **T2.4 Fixture clip and reference.** Add a 10 s English WAV (16 kHz mono) and its reference transcript to `tests/fixtures/`. Use a clip you own or recorded yourself, or one with a license that allows committing it.
+- [x] **T2.3 Whisper adapter.** (Verified on the T2.4 clip through `compare_asr.py`: matches the reference apart from case and punctuation; 1.6 s for 9.9 s of audio on the RTX 3060, fp16.) `backend/asr/whisper.py`: `transformers` pipeline for `openai/whisper-large-v3`, English forced, fp16 on GPU (CPU fallback for dev).
+  Done when: it transcribes the test clip through the adapter interface.
+- [x] **T2.4 Fixture clip and reference.** (LibriSpeech dev-clean utterance 1272-128104-0003, 9.9 s, CC BY 4.0, attribution in `tests/fixtures/README.md`.) Add a 10 s English WAV (16 kHz mono) and its reference transcript to `tests/fixtures/`. Use a clip you own or recorded yourself, or one with a license that allows committing it.
   Done when: both files are committed.
-- [~] **T2.5 `scripts/compare_asr.py`.** Run every registered adapter on the fixture, print transcript and `asr_ms` per model. A model that fails to load prints its error and the script continues.
+- [x] **T2.5 `scripts/compare_asr.py`.** Run every registered adapter on the fixture, print transcript and `asr_ms` per model. A model that fails to load prints its error and the script continues.
   Done when: the script runs and prints a row for Whisper (the others are added in M4).
 - [~] **T2.6 Run ASR off the event loop.** Run `transcribe()` in a thread pool from the session. Time it per SPEC 6.3.2 (`asr_ms` excludes queueing and first-use load; log `model_load_ms` separately).
   Done when: a second WebSocket client stays responsive while an ASR call runs.

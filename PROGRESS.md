@@ -1,7 +1,7 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 81bb7cf (Add M1 backend: config, protocol, transport, session, app)
+- Latest commit: 488e109 (Verify M1 in Chrome, remove protocol mock, update workflow docs)
 - Test status: 82 pytest tests passing (audio, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself has not been run on real weights yet. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
@@ -23,6 +23,7 @@
 - [~] T2.6 service: unit tested with a fake adapter; the "second WebSocket client stays responsive" check needs the session code
 
 ## Known Issues
+- M0 checked: Python 3.13, torch 2.14 (CUDA 13.0, RTX 3060 visible), transformers 5.17, fastapi, uvicorn, pydantic all import together and `uv pip check` is clean. Missing: `litellm` (T0.2; a dry-run install adds only new packages, no conflicts, so add it at T3.1) and NeMo (deferred, T0.1/T0.3/T0.4)
 - Safari 16 kHz handling never checked (no Safari on the dev machine; T1.11 passed on Chrome only)
 - `ProtocolError` messages include pydantic's raw text (multi-line, with a URL); shorten before they are shown in the chat
 - The mic stays open (browser mic indicator on) after first enabling it, to avoid clipping the start of speech
