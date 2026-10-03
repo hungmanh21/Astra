@@ -4,13 +4,18 @@ One Session per WebSocket connection. It talks to the client only through a `Tra
 (see transport.py) and imports no FastAPI types.
 
 M1 scope: session message, start_turn, audio frames, end_turn with validation and the
-debug WAV. ASR, review mode and the LLM are added in M2-M4.
+debug WAV. M2 adds ASR (PLAN T2.6, T2.7). Review mode and the LLM come in M3-M4.
 """
 
+import asyncio
+import logging
 import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 
+import numpy as np
+
+from backend.asr.service import TranscriptionService
 from backend.audio import AudioError, TurnAudioBuffer
 from backend.config import Settings
 from backend.protocol import (
@@ -18,21 +23,27 @@ from backend.protocol import (
     DiscardTurn,
     EndTurn,
     ErrorMessage,
+    LlmDone,
     ProtocolError,
     Reset,
     ServerMessage,
     SessionInfo,
     StartTurn,
+    Timings,
+    Transcript,
     TurnStarted,
     parse_client_message,
 )
 from backend.transport import Transport
 
+log = logging.getLogger(__name__)
+
 
 class TurnStage(StrEnum):
     IDLE = "idle"
     RECEIVING = "receiving"  # between start_turn and end_turn
-    # M2 adds WORKING (ASR/LLM running), M4 adds AWAITING_CONFIRM (review mode).
+    WORKING = "working"  # end_turn accepted, the ASR (later the LLM) is running
+    # M4 adds AWAITING_CONFIRM (review mode).
 
 
 @dataclass
@@ -41,13 +52,18 @@ class Turn:
     asr_model: str
     review: bool
     audio: TurnAudioBuffer
-    # M2: add the perf_counter() taken at end_turn, for e2e_ms (SPEC 6.3.2).
+    # M3: add the perf_counter() taken at end_turn, for e2e_ms (SPEC 6.3.2).
 
 
 class Session:
-    def __init__(self, transport: Transport, settings: Settings) -> None:
+    def __init__(
+        self, transport: Transport, settings: Settings, transcriber: TranscriptionService
+    ) -> None:
         self._transport = transport
         self._settings = settings
+        self._transcriber = transcriber
+        # The running ASR job of the current turn. Kept so on_disconnect can cancel it.
+        self._task: asyncio.Task[None] | None = None
         self.id = uuid.uuid4().hex[:8]
         self.history: list[dict[str, str]] = []  # used from M3
         self.stage = TurnStage.IDLE
@@ -94,7 +110,14 @@ class Session:
             await self._error(str(exc), turn_id)
 
     async def on_disconnect(self) -> None:
-        # M2: also cancel the running turn task here.
+        # A turn still in the ASR must not try to answer a browser that has left.
+        task = self._task
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            self._task = None
+
+        self._finish_turn()
         self._finish_turn()
 
     # --- message handlers ---
@@ -124,7 +147,7 @@ class Session:
 
         turn = self.turn
         try:
-            turn.audio.to_float32()  # validates the whole turn; M2 passes the samples to the ASR
+            samples = turn.audio.to_float32()  # validates the whole turn
             if self._settings.debug_save_audio:
                 turn.audio.save_wav(self._settings.debug_audio_dir / f"{self.id}-{turn.id}.wav")
         except AudioError as exc:
@@ -132,8 +155,35 @@ class Session:
             await self._error(str(exc), turn.id)
             return
 
-        self._finish_turn()
-        await self._error("ASR is not connected yet", turn.id)  # M1 only; T2.7 replaces this
+        # Background task: the handler returns at once, so the receive loop stays free to
+        # reject a start_turn or reset while the ASR runs.
+        self.stage = TurnStage.WORKING
+        self._task = asyncio.create_task(self._run_turn(turn, samples))
+
+    async def _run_turn(self, turn: Turn, samples: np.ndarray) -> None:
+        """Transcribe one turn and answer the browser. Runs as a background task."""
+        try:
+            result = await self._transcriber.transcribe(turn.asr_model, samples)
+            if result.model_load_ms > 0:
+                log.info(
+                    "first use of model %s: load time %.1f ms", turn.asr_model, result.model_load_ms
+                )
+            await self._send(Transcript(turn_id=turn.id, text=result.text, asr_ms=result.asr_ms))
+            # M2 placeholder, replaced by the LLM call in M3: the UI waits for llm_done.
+            await self._send(
+                LlmDone(
+                    turn_id=turn.id,
+                    text="",
+                    timings=Timings(audio_s=result.audio_s, asr_ms=result.asr_ms),
+                )
+            )
+        except Exception:
+            # Catch everything: a task that dies silently leaves the stage stuck on WORKING.
+            # The message is fixed on purpose, ASR error text can contain internals.
+            log.exception("transcription failed for turn %s", turn.id)
+            await self._error("transcription failed", turn.id)
+        finally:
+            self._finish_turn()
 
     async def _on_reset(self) -> None:
         if self.stage != TurnStage.IDLE:

@@ -10,8 +10,11 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, WebSocket
+from fastapi.concurrency import asynccontextmanager
 from fastapi.staticfiles import StaticFiles
 
+from backend.asr.registry import ASRRegistry
+from backend.asr.service import TranscriptionService
 from backend.config import Settings, load_settings
 from backend.session import Session
 from backend.transport import WebSocketTransport
@@ -19,17 +22,32 @@ from backend.transport import WebSocketTransport
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build the app. A factory, so tests can pass their own Settings."""
+def create_app(
+    settings: Settings | None = None, transcriber: TranscriptionService | None = None
+) -> FastAPI:
+    """Build the app. A factory, so tests can pass their own Settings and transcriber."""
     settings = settings or load_settings()
-    app = FastAPI()
-    app.state.settings = settings  # M2 adds the registry and TranscriptionService here
+
+    # Models stay lazy: nothing is loaded here, the first turn on a model loads it.
+    if transcriber is None:
+        registry = ASRRegistry(settings.asr_models)
+        transcriber = TranscriptionService(registry)
+
+    # Stops the ASR worker thread when the server stops.
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        transcriber.shutdown()
+
+    app = FastAPI(lifespan=lifespan)
+    app.state.settings = settings
+    app.state.transcriber = transcriber
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
         await ws.accept()
         transport = WebSocketTransport(ws)
-        await transport.run(Session(transport, settings))
+        await transport.run(Session(transport, settings, transcriber))
 
     # Mounted last so it does not shadow /ws.
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

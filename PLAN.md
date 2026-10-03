@@ -79,9 +79,9 @@ Goal: recorded speech comes back as a transcript in the chat, using Whisper. Cov
   Done when: both files are committed.
 - [x] **T2.5 `scripts/compare_asr.py`.** Run every registered adapter on the fixture, print transcript and `asr_ms` per model. A model that fails to load prints its error and the script continues.
   Done when: the script runs and prints a row for Whisper (the others are added in M4).
-- [~] **T2.6 Run ASR off the event loop.** Run `transcribe()` in a thread pool from the session. Time it per SPEC 6.3.2 (`asr_ms` excludes queueing and first-use load; log `model_load_ms` separately).
+- [x] **T2.6 Run ASR off the event loop.** (Verified by `test_second_client_stays_responsive_while_an_asr_call_runs`.) Run `transcribe()` in a thread pool from the session. Time it per SPEC 6.3.2 (`asr_ms` excludes queueing and first-use load; log `model_load_ms` separately).
   Done when: a second WebSocket client stays responsive while an ASR call runs.
-- [ ] **T2.7 Wire ASR into the turn.** On `end_turn`, transcribe and send `transcript` (with `asr_ms`). Show the user's transcript in the chat.
+- [x] **T2.7 Wire ASR into the turn.** (Browser check passed: the transcript renders in the UI.) (Until M3 the turn ends with an empty `llm_done` carrying `audio_s` and `asr_ms`, because the UI waits for `llm_done` before it unlocks.) On `end_turn`, transcribe and send `transcript` (with `asr_ms`). Show the user's transcript in the chat.
   Done when: hold, speak, release shows the transcript in the UI.
 - [ ] **T2.8 M2 check.** Record 3 different sentences and confirm sensible transcripts. Note the `asr_ms` for a 5 s utterance.
   Done when: transcripts show correctly and the timing is recorded in the M2 notes.
