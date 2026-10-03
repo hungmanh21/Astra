@@ -169,3 +169,22 @@ def test_conversation_history_lives_per_connection():
                 while ws.receive_json()["type"] != "llm_done":
                     pass
     assert [len(call) for call in llm.calls] == [2, 2]  # system + user, both times
+
+
+def test_review_flow_over_the_websocket():
+    llm = FakeLLM(deltas=("OK",))
+    client = TestClient(create_app(make_settings(), llm=llm))
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "start_turn", "asr_model": MODELS[0], "review": True})
+        turn_id = ws.receive_json()["turn_id"]
+        for frame in chunks(pcm(0.5)):
+            ws.send_bytes(frame)
+        ws.send_json({"type": "end_turn"})
+        assert ws.receive_json()["type"] == "transcript"  # and then the server waits
+
+        ws.send_json({"type": "confirm_turn", "turn_id": turn_id, "text": "edited"})
+        assert ws.receive_json() == {"type": "llm_delta", "turn_id": turn_id, "text": "OK"}
+        done = ws.receive_json()
+        assert done["type"] == "llm_done" and done["text"] == "OK"
+    assert llm.calls[0][-1] == {"role": "user", "content": "edited"}  # the edit, not the ASR text

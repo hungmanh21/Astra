@@ -127,7 +127,7 @@ Goal: all three ASR models are selectable at runtime, and transcripts can be rev
   Done when: two consecutive turns with different models use different adapters with no restart, and the second turn on an already-used model has no load delay.
 - [ ] **T4.5 UI: model dropdown.** Fill the dropdown from the `session` message and send the selection with every `start_turn`.
   Done when: changing the dropdown changes which model transcribes the next turn.
-- [ ] **T4.6 Review mode (server).** With `review: true`, stop after `transcript` and wait for `confirm_turn` (edited text is what goes into history and to the LLM) or `discard_turn` (nothing added, turn ends). The turn stays in flight while waiting (FR-13). Reject a `confirm_turn` or `discard_turn` with a wrong `turn_id`.
+- [x] **T4.6 Review mode (server).** (Blank `confirm_turn` text is an error that ends the turn, `discard_turn` sends nothing back, think time is excluded from `e2e_ms`.) With `review: true`, stop after `transcript` and wait for `confirm_turn` (edited text is what goes into history and to the LLM) or `discard_turn` (nothing added, turn ends). The turn stays in flight while waiting (FR-13). Reject a `confirm_turn` or `discard_turn` with a wrong `turn_id`.
   Done when: state machine and flow tests cover confirm, edited confirm, discard, and wrong id.
 - [ ] **T4.7 Review mode (UI).** Add the "review transcript" toggle (default off), an editable transcript box with Send and Discard buttons, and keep the mic disabled while reviewing.
   Done when: with the toggle on I can edit a transcript before it reaches the LLM, or discard it and see nothing added to the conversation.

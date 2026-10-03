@@ -621,3 +621,256 @@ def test_disconnect_while_the_reply_streams_cancels_the_llm_and_sends_nothing():
 
     llm = FakeLLM(gate=asyncio.Event())
     run(scenario, llm=llm)
+
+
+# --- M4: review mode (T4.6) ---
+
+
+def confirm_msg(turn_id: str, text: str) -> str:
+    return json.dumps({"type": "confirm_turn", "turn_id": turn_id, "text": text})
+
+
+def discard_msg(turn_id: str) -> str:
+    return json.dumps({"type": "discard_turn", "turn_id": turn_id})
+
+
+async def review_turn(session: Session, data: bytes | None = None) -> None:
+    """A turn with review on, up to the point where it waits for the user."""
+    await session.on_json(start_msg(review=True))
+    for frame in chunks(data or pcm(0.5)):
+        await session.on_audio_frame(frame)
+    await session.on_json(END)
+    async with asyncio.timeout(2):
+        while session.stage != TurnStage.AWAITING_CONFIRM:  # noqa: ASYNC110
+            await asyncio.sleep(0.005)
+
+
+def test_review_turn_stops_after_the_transcript_and_waits():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await review_turn(session)
+        await asyncio.sleep(0.05)
+        assert transport.types() == ["session", "turn_started", "transcript"]
+        assert session.stage == TurnStage.AWAITING_CONFIRM
+        assert session.history == []
+
+    run(scenario, llm=llm)
+    assert llm.calls == []
+
+
+def test_confirm_sends_the_reply_and_the_history_gets_the_text():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await review_turn(session)
+        turn_id = transport.last("turn_started")["turn_id"]
+        await session.on_json(confirm_msg(turn_id, "hello world"))
+        await settle(session)
+
+        assert transport.types()[2:] == ["transcript", "llm_delta", "llm_delta", "llm_done"]
+        done = transport.last("llm_done")
+        assert done["turn_id"] == turn_id and done["text"] == "Hi there"
+        assert done["timings"]["audio_s"] == 0.5  # from the original transcription
+        assert done["timings"]["asr_ms"] == 12.5
+        assert session.history == [
+            {"role": "user", "content": "hello world"},
+            {"role": "assistant", "content": "Hi there"},
+        ]
+
+    run(scenario, llm=llm)
+    assert llm.calls == [[SYSTEM, {"role": "user", "content": "hello world"}]]
+
+
+def test_confirm_with_edited_text_sends_the_edit_to_the_llm_and_history():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await review_turn(session)
+        turn_id = transport.last("turn_started")["turn_id"]
+        await session.on_json(confirm_msg(turn_id, "  what is the weather  "))
+        await settle(session)
+        assert transport.last("transcript")["text"] == "hello world"  # the original, unchanged
+        assert session.history[0] == {"role": "user", "content": "what is the weather"}
+
+    run(scenario, llm=llm)
+    assert llm.calls[0][1] == {"role": "user", "content": "what is the weather"}
+
+
+def test_discard_ends_the_turn_adds_nothing_and_sends_nothing():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await review_turn(session)
+        turn_id = transport.last("turn_started")["turn_id"]
+        sent_before = len(transport.sent)
+        await session.on_json(discard_msg(turn_id))
+        await asyncio.sleep(0.02)
+
+        assert len(transport.sent) == sent_before
+        assert session.stage == TurnStage.IDLE
+        assert session.turn is None
+        assert session.history == []
+
+        # the session is usable again
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        assert transport.types().count("llm_done") == 1
+
+    run(scenario, llm=llm)
+    assert len(llm.calls) == 1
+
+
+def test_wrong_turn_id_is_an_error_and_the_waiting_turn_survives():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await review_turn(session)
+        turn_id = transport.last("turn_started")["turn_id"]
+
+        await session.on_json(confirm_msg("wrong", "hi"))
+        assert transport.last("error")["turn_id"] == "wrong"
+        await session.on_json(discard_msg("wrong"))
+        assert transport.last("error")["turn_id"] == "wrong"
+        assert transport.types().count("error") == 2
+        assert session.stage == TurnStage.AWAITING_CONFIRM
+
+        await session.on_json(confirm_msg(turn_id, "hello world"))  # the right id still works
+        await settle(session)
+        assert transport.types().count("llm_done") == 1
+
+    run(scenario, llm=llm)
+
+
+def test_blank_confirm_is_an_error_and_ends_the_turn():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await review_turn(session)
+        turn_id = transport.last("turn_started")["turn_id"]
+        await session.on_json(confirm_msg(turn_id, "   "))
+        error = transport.last("error")
+        assert error["turn_id"] == turn_id
+        assert session.stage == TurnStage.IDLE  # the browser ends its turn on an error too
+        assert session.history == []
+
+    run(scenario, llm=llm)
+    assert llm.calls == []
+
+
+def test_blank_transcript_in_review_mode_waits_and_can_be_discarded():
+    llm = FakeLLM()
+
+    async def scenario(session, transport):
+        await review_turn(session)
+        assert transport.last("transcript")["text"].strip() == ""
+        assert "llm_done" not in transport.types()
+        await session.on_json(discard_msg(transport.last("turn_started")["turn_id"]))
+        assert session.stage == TurnStage.IDLE
+
+    run(scenario, transcriber=FakeTranscriber(text=""), llm=llm)
+    assert llm.calls == []
+
+
+def test_the_turn_stays_in_flight_while_waiting_for_review():
+    async def scenario(session, transport):
+        await review_turn(session)
+        errors_before = transport.types().count("error")
+
+        await session.on_json(start_msg())
+        await session.on_json(json.dumps({"type": "reset"}))
+        assert transport.types().count("error") == errors_before + 2
+        assert transport.types().count("turn_started") == 1
+
+        await session.on_audio_frame(pcm(0.5))  # ignored
+        await session.on_json(END)  # ignored
+        assert transport.types().count("error") == errors_before + 2
+        assert session.stage == TurnStage.AWAITING_CONFIRM
+
+    run(scenario)
+
+
+def test_confirm_and_discard_are_rejected_in_every_other_stage():
+    gate = asyncio.Event()
+
+    async def scenario(session, transport):
+        # idle
+        await session.on_json(confirm_msg("t", "hi"))
+        await session.on_json(discard_msg("t"))
+        # receiving
+        await session.on_json(start_msg())
+        turn_id = transport.last("turn_started")["turn_id"]
+        await session.on_json(confirm_msg(turn_id, "hi"))
+        await session.on_json(discard_msg(turn_id))
+        assert session.stage == TurnStage.RECEIVING
+        for frame in chunks(pcm(0.5)):
+            await session.on_audio_frame(frame)
+        await session.on_json(END)
+        await asyncio.sleep(0.02)
+        # working (the ASR is held on the gate)
+        await session.on_json(confirm_msg(turn_id, "hi"))
+        await session.on_json(discard_msg(turn_id))
+        assert session.stage == TurnStage.WORKING
+        assert transport.types().count("error") == 6
+        assert all(m["turn_id"] in ("t", turn_id) for m in transport.sent if m["type"] == "error")
+        gate.set()
+        await settle(session)
+
+    run(scenario, transcriber=FakeTranscriber(gate=gate))
+
+
+def test_a_second_confirm_for_the_same_turn_is_rejected():
+    llm = FakeLLM(gate=asyncio.Event())
+
+    async def scenario(session, transport):
+        await review_turn(session)
+        turn_id = transport.last("turn_started")["turn_id"]
+        await session.on_json(confirm_msg(turn_id, "hello world"))
+        await asyncio.sleep(0.05)  # the reply is streaming now
+        await session.on_json(confirm_msg(turn_id, "hello again"))
+        assert transport.last("error")["turn_id"] == turn_id
+        llm.gate.set()
+        await settle(session)
+        assert transport.types().count("llm_done") == 1
+
+    run(scenario, llm=llm)
+    assert len(llm.calls) == 1
+
+
+def test_e2e_time_excludes_the_users_thinking_time():
+    async def scenario(session, transport):
+        await review_turn(session)
+        await asyncio.sleep(0.4)  # the user reads and edits
+        await session.on_json(confirm_msg(transport.last("turn_started")["turn_id"], "hi"))
+        await settle(session)
+        timings = transport.last("llm_done")["timings"]
+        assert timings["e2e_ms"] < 300
+        assert timings["e2e_ms"] >= timings["llm_total_ms"]
+
+    run(scenario)
+
+
+def test_llm_failure_after_confirm_keeps_the_confirmed_text_in_history():
+    async def scenario(session, transport):
+        await review_turn(session)
+        turn_id = transport.last("turn_started")["turn_id"]
+        await session.on_json(confirm_msg(turn_id, "edited question"))
+        await settle(session)
+        assert transport.last("error")["message"] == "LLM request failed"
+        assert session.history == [{"role": "user", "content": "edited question"}]
+
+    run(scenario, llm=FakeLLM(error=RuntimeError("secret")))
+
+
+def test_disconnect_while_waiting_for_review_drops_the_turn():
+    async def scenario(session, transport):
+        await review_turn(session)
+        sent_before = len(transport.sent)
+        await session.on_disconnect()
+        assert len(transport.sent) == sent_before
+        assert session.stage == TurnStage.IDLE
+        assert session.turn is None
+        await session.on_json(confirm_msg("anything", "hi"))  # nothing is waiting any more
+        assert transport.last("error")["turn_id"] == "anything"
+
+    run(scenario)

@@ -48,7 +48,7 @@ class TurnStage(StrEnum):
     IDLE = "idle"
     RECEIVING = "receiving"  # between start_turn and end_turn
     WORKING = "working"  # end_turn accepted, the ASR (later the LLM) is running
-    # M4 adds AWAITING_CONFIRM (review mode).
+    AWAITING_CONFIRM = "awaiting_confirm"  # review mode: transcript sent, waiting for the user
 
 
 @dataclass
@@ -58,6 +58,9 @@ class Turn:
     review: bool
     audio: TurnAudioBuffer
     ended_at: float = 0.0  # time.perf_counter() at end_turn, for e2e_ms (SPEC 6.3.2)
+    # Review mode (T4.6): the ASR result kept while the user edits, and when the wait began.
+    transcription: Transcription | None = None
+    review_started_at: float = 0.0
 
 
 class Session:
@@ -189,6 +192,14 @@ class Session:
                 )
             await self._send(Transcript(turn_id=turn.id, text=result.text, asr_ms=result.asr_ms))
 
+            # Review mode: wait for confirm_turn / discard_turn. A blank transcript waits too, the
+            # UI shows an empty box and the user discards it.
+            if turn.review:
+                turn.transcription = result
+                turn.review_started_at = time.perf_counter()
+                self.stage = TurnStage.AWAITING_CONFIRM
+                return
+
             if result.text.strip() == "":
                 # Nothing to ask the model; llm_done is what unlocks the UI.
                 await self._send(
@@ -202,7 +213,8 @@ class Session:
 
             await self._reply(turn, result, result.text)
         finally:
-            self._finish_turn()
+            if self.stage != TurnStage.AWAITING_CONFIRM:
+                self._finish_turn()
 
     async def _reply(self, turn: Turn, result: Transcription, text: str) -> None:
         # `text` is the transcript, or the edited one in review mode. The user message stays
@@ -253,8 +265,39 @@ class Session:
         self.history.clear()
 
     async def _on_review_decision(self, msg: ConfirmTurn | DiscardTurn) -> None:
-        # M4 (T4.6) implements review mode; until then nothing can be waiting.
-        await self._error("no transcript is waiting for review", msg.turn_id)
+        """confirm_turn / discard_turn (review mode only)."""
+        turn = self.turn
+        if self.stage != TurnStage.AWAITING_CONFIRM or turn is None or msg.turn_id != turn.id:
+            await self._error("no transcript is waiting for review", msg.turn_id)
+            return
+
+        if isinstance(msg, DiscardTurn):
+            # Nothing is added to the history, and the browser already removed the bubble.
+            self._finish_turn()
+            return
+
+        text = msg.text.strip()
+        if not text:
+            self._finish_turn()
+            await self._error("transcript is empty", turn.id)
+            return
+
+        # Move the turn's clock past the user's thinking time, so e2e_ms excludes it.
+        turn.ended_at += time.perf_counter() - turn.review_started_at
+        self.stage = TurnStage.WORKING
+        self._task = asyncio.create_task(self._run_confirmed(turn, text))
+
+    async def _run_confirmed(self, turn: Turn, text: str) -> None:
+        """The LLM half of a reviewed turn. Runs as a background task."""
+        try:
+            assert turn.transcription is not None  # set when the turn started waiting
+            await self._reply(turn, turn.transcription, text)
+        except Exception:
+            # _reply handles LLM errors itself; this keeps any other failure from dying silently.
+            log.exception("reply failed for turn %s", turn.id)
+            await self._error("LLM request failed", turn.id)
+        finally:
+            self._finish_turn()
 
     # --- helpers ---
 
