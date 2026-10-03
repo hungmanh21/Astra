@@ -40,21 +40,21 @@ Goal: prove the dependency stack works together before writing any app code. Thi
 
 Goal: audio recorded in the browser reaches the server intact. No ASR or LLM yet. Covers FR-2, FR-3, FR-12 (UI side).
 
-- [~] **T1.1 Project scaffold.** (`frontend/` and `scripts/` exist; `backend/`, `tests/`, `config.yaml`, `.env.example` come with the backend tasks.) Create `backend/`, `frontend/`, `scripts/`, `tests/fixtures/`, `config.yaml`, `.env.example`, matching SPEC 6.6. Add `.env` to `.gitignore`.
+- [x] **T1.1 Project scaffold.** Create `backend/`, `frontend/`, `scripts/`, `tests/fixtures/`, `config.yaml`, `.env.example`, matching SPEC 6.6. Add `.env` to `.gitignore`.
   Done when: the folders exist and `.env` is ignored.
-- [ ] **T1.2 Config loader.** `backend/config.py`: load `.env` and `config.yaml` into a typed settings object (ASR model registry entries, default ASR model, LLM settings, system prompt, `DEBUG_SAVE_AUDIO` flag, max turn seconds = 30).
+- [x] **T1.2 Config loader.** `backend/config.py`: load `.env` and `config.yaml` into a typed settings object (ASR model registry entries, default ASR model, LLM settings, system prompt, `DEBUG_SAVE_AUDIO` flag, max turn seconds = 30).
   Done when: a unit test loads a sample config and reads each field.
-- [ ] **T1.3 FastAPI app and static serving.** `backend/main.py` with `/ws` and static serving of `frontend/`. Run with `uvicorn`.
+- [x] **T1.3 FastAPI app and static serving.** `backend/main.py` with `/ws` and static serving of `frontend/`. Run with `uvicorn`.
   Done when: opening `http://localhost:8000` serves the page and `/ws` accepts a connection.
-- [ ] **T1.4 Protocol models.** Pydantic models for every message in SPEC 6.3 (client and server), with a `type` discriminator.
+- [x] **T1.4 Protocol models.** Pydantic models for every message in SPEC 6.3 (client and server), with a `type` discriminator.
   Done when: unit tests parse valid messages and reject malformed ones.
-- [ ] **T1.5 Transport interface.** Define the small interface (`send_json`, `send_bytes`, `on_audio_frame`) and a WebSocket implementation of it (SPEC 6.3, WebRTC seam). Session code must only use the interface.
+- [x] **T1.5 Transport interface.** Define the small interface (`send_json`, `send_bytes`, `on_audio_frame`) and a WebSocket implementation of it (SPEC 6.3, WebRTC seam). Session code must only use the interface.
   Done when: the session layer imports no FastAPI types.
-- [ ] **T1.6 Session skeleton.** `backend/session.py`: per-connection state (session id, history list, current turn or none). On connect, send the `session` message (session id, available models, default model).
+- [~] **T1.6 (code and WebSocket test done; browser console check pending) Session skeleton.** `backend/session.py`: per-connection state (session id, history list, current turn or none). On connect, send the `session` message (session id, available models, default model).
   Done when: the browser console shows the `session` message after connecting.
 - [x] **T1.7 Audio buffer and validation.** `backend/audio.py`: collect binary frames per turn, then produce a float32 array in [-1, 1]. Reject an empty turn, odd byte count, or over 30 s with an `error` (FR-12, SPEC 6.3.1).
   Done when: unit tests cover a good buffer, empty, odd length, and too long.
-- [ ] **T1.8 Turn handling for audio only.** Handle `start_turn` (send `turn_started`), audio frames, and `end_turn`. With `DEBUG_SAVE_AUDIO` on, write the turn to a WAV file. Otherwise audio stays in memory (privacy NFR).
+- [x] **T1.8 Turn handling for audio only.** Handle `start_turn` (send `turn_started`), audio frames, and `end_turn`. With `DEBUG_SAVE_AUDIO` on, write the turn to a WAV file. Otherwise audio stays in memory (privacy NFR).
   Done when: a test client sending a known PCM16 buffer produces a matching WAV in debug mode and no file when the flag is off.
 - [x] **T1.9 Recorder worklet.** (Verified in a browser against `scripts/mock_server.py`; logic also covered by stubbed Node tests.) `frontend/recorder-worklet.js`: capture the mic through `AudioWorklet`, resample to 16 kHz mono where the `AudioContext` does not run at 16 kHz, convert to PCM16, and post 20-100 ms frames.
   Done when: logged frame sizes and sample rate are correct in Chrome.

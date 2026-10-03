@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 theory/fundamentals/examples/output/
 scripts/output/
+
+.env
+debug_audio/

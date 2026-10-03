@@ -1,0 +1,39 @@
+"""Shared test helpers for the M1 backend tests."""
+
+from pathlib import Path
+
+import numpy as np
+
+from backend.asr.registry import ASRModelConfig
+from backend.audio import SAMPLE_RATE
+from backend.config import LLMSettings, Settings
+
+MODELS = ["whisper-large-v3", "other-model"]
+
+
+def make_settings(
+    debug_dir: Path | None = None, max_turn_seconds: float = 30, models: list[str] = MODELS
+) -> Settings:
+    """Settings built by hand. Debug saving is on only when `debug_dir` is given."""
+    cfg = ASRModelConfig(adapter="tests.test_asr_registry.FakeASR", model_id="fake/model")
+    return Settings(
+        asr_models={name: cfg for name in models},
+        default_asr_model=models[0],
+        llm=LLMSettings(
+            model="test/model", api_base=None, system_prompt="be brief", max_history_tokens=1000
+        ),
+        max_turn_seconds=max_turn_seconds,
+        debug_save_audio=debug_dir is not None,
+        debug_audio_dir=debug_dir or Path("unused"),
+    )
+
+
+def pcm(seconds: float, freq: float = 440.0) -> bytes:
+    """A sine wave as raw PCM16 little-endian bytes at 16 kHz."""
+    t = np.arange(int(seconds * SAMPLE_RATE)) / SAMPLE_RATE
+    return (np.sin(2 * np.pi * freq * t) * 10_000).astype("<i2").tobytes()
+
+
+def chunks(data: bytes, size: int = 1600) -> list[bytes]:
+    """Split into WebSocket-frame-sized pieces (1600 bytes = 50 ms)."""
+    return [data[i : i + size] for i in range(0, len(data), size)]

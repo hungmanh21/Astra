@@ -54,3 +54,7 @@
 ## 2026-10-01: PROGRESS.md is committed together with the work
 - Reason: PROGRESS.md should describe the repo as of the commit that contains it (done, in progress, next), so it is updated before committing and goes in the same commit.
 - Constraint: a commit cannot contain its own hash, so "Latest commit" names the previous commit.
+
+## 2026-10-01: Transport seam is a send-side Protocol plus a handler the transport drives
+- Reason: `Transport` (send_json, send_bytes) is what the session sends through; the transport's receive loop calls `Session.on_json` / `on_audio_frame`. Session code imports no FastAPI types, so WebRTC can replace the WebSocket later (SPEC 6.3 seam).
+- Constraint: in M1 the session answers a valid `end_turn` with an "ASR is not connected yet" error so the frontend unlocks; T2.7 replaces that with the transcription.

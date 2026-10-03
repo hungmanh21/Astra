@@ -1,5 +1,5 @@
 # Model registry and defaults (SPEC 6.2). Secrets live in .env, never here.
-# The loader (PLAN T1.2) turns each `asr.models` entry into an ASRModelConfig.
+# backend/config.py turns this file (plus .env) into a Settings object.
 
 asr:
   default_model: whisper-large-v3
@@ -10,3 +10,18 @@ asr:
       options:
         device: auto
         dtype: float16
+
+# Used from M3 on. The model name is a placeholder until T3.1 picks one.
+llm:
+  model: gemini/TODO-pick-model
+  api_base: null
+  system_prompt: >
+    You are a voice assistant. The user's words come from speech recognition, so they may
+    contain small mistakes. Answer in one to three short sentences.
+  max_history_tokens: 4000
+
+limits:
+  max_turn_seconds: 30
+
+debug:
+  audio_dir: debug_audio # only used when DEBUG_SAVE_AUDIO=1
