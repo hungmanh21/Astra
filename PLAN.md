@@ -83,7 +83,7 @@ Goal: recorded speech comes back as a transcript in the chat, using Whisper. Cov
   Done when: a second WebSocket client stays responsive while an ASR call runs.
 - [x] **T2.7 Wire ASR into the turn.** (Browser check passed: the transcript renders in the UI.) (Until M3 the turn ends with an empty `llm_done` carrying `audio_s` and `asr_ms`, because the UI waits for `llm_done` before it unlocks.) On `end_turn`, transcribe and send `transcript` (with `asr_ms`). Show the user's transcript in the chat.
   Done when: hold, speak, release shows the transcript in the UI.
-- [ ] **T2.8 M2 check.** Record 3 different sentences and confirm sensible transcripts. Note the `asr_ms` for a 5 s utterance.
+- [x] **T2.8 M2 check.** (Chrome: 4.6 s of audio gave `asr_ms` 1.16 s, warm `whisper-large-v3`, fp16, RTX 3060.) Record 3 different sentences and confirm sensible transcripts. Note the `asr_ms` for a 5 s utterance.
   Done when: transcripts show correctly and the timing is recorded in the M2 notes.
 
 ---
@@ -142,13 +142,13 @@ Goal: timings visible, logs structured, vLLM path working, README done. Covers F
 
 - [x] **T5.1 Timings.** (Fake-clock tests pass; `Session` takes an injectable `clock`.) Compute `audio_s`, `asr_ms`, `llm_ttft_ms`, `llm_total_ms`, `e2e_ms` as defined in SPEC 6.3.2 with a monotonic clock, and include them in `llm_done`.
   Done when: a unit test with fake clocks checks each definition, including that review-mode think time is excluded from `e2e_ms`.
-- [ ] **T5.2 Timings in the UI.** Show all five values under each turn (FR-10).
+- [x] **T5.2 Timings in the UI.** (Checked in Chrome: audio, ASR, first token, LLM and end-to-end all show under the turn.) Show all five values under each turn (FR-10).
   Done when: every finished turn shows the five values.
 - [x] **T5.3 Structured logs.** (One JSON line per turn from `backend/turnlog.py`, never containing the transcript or reply.) One structured log record per turn with session id, turn id, model names, timings, and any error.
   Done when: a run produces parseable log lines that include failed turns.
 - [ ] **T5.4 vLLM path.** Choose the vLLM model, start a local vLLM server with a capped `--gpu-memory-utilization` (start near 0.6), and point the config at it with `hosted_vllm/<model>` and `api_base`. Measure real ASR memory use and adjust the cap if needed.
   Done when: changing only the config (no code changes) switches the reply source between Gemini and vLLM, and all three ASR models plus vLLM run at once without an out-of-memory error.
-- [ ] **T5.5 Edge-case tests.** Add end-to-end tests over a real WebSocket with fake ASR and LLM for: over-30 s turn rejected, `start_turn` during an in-flight turn, unknown ASR model, connection dropped mid-turn.
+- [x] **T5.5 Edge-case tests.** (`tests/test_edge_cases.py`.) Add end-to-end tests over a real WebSocket with fake ASR and LLM for: over-30 s turn rejected, `start_turn` during an in-flight turn, unknown ASR model, connection dropped mid-turn.
   Done when: the tests pass in CI-style `pytest` with no GPU needed.
 - [ ] **T5.6 Latency check.** Measure ASR + LLM first token for a 5 s utterance on each ASR model (target under about 3 s; not a hard gate). Record results and note any obvious hotspot for v1.
   Done when: the numbers are written down in a short notes section in this file or the README.
