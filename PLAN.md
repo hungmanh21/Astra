@@ -123,9 +123,9 @@ Goal: all three ASR models are selectable at runtime, and transcripts can be rev
   Done when: `compare_asr.py` prints a Nemotron row, and switching the checkpoint is a config-only edit.
 - [ ] **T4.3 Compare script over all models.** Confirm `compare_asr.py` covers all three, prints a small table, and returns non-empty text for each (AC).
   Done when: one run prints three rows with non-empty transcripts.
-- [x] **T4.4 Runtime model selection.** (Code and tests done; checked with one model only. Re-check the switch between two models when a second ASR model exists.) Honor `asr_model` in `start_turn` (reject unknown keys with an `error`). Keep loaded models resident, with no eviction.
+- [x] **T4.4 Runtime model selection.** (Code and tests done; the switch between `whisper-large-v3` and `whisper-large-v3-turbo` checked in Chrome.) Honor `asr_model` in `start_turn` (reject unknown keys with an `error`). Keep loaded models resident, with no eviction.
   Done when: two consecutive turns with different models use different adapters with no restart, and the second turn on an already-used model has no load delay.
-- [x] **T4.5 UI: model dropdown.** (Dropdown works with the single Whisper entry; the switch itself is re-checked together with T4.4.) Fill the dropdown from the `session` message and send the selection with every `start_turn`.
+- [x] **T4.5 UI: model dropdown.** (Dropdown and the switch checked in Chrome with two Whisper models.) Fill the dropdown from the `session` message and send the selection with every `start_turn`.
   Done when: changing the dropdown changes which model transcribes the next turn.
 - [x] **T4.6 Review mode (server).** (Blank `confirm_turn` text is an error that ends the turn, `discard_turn` sends nothing back, think time is excluded from `e2e_ms`.) With `review: true`, stop after `transcript` and wait for `confirm_turn` (edited text is what goes into history and to the LLM) or `discard_turn` (nothing added, turn ends). The turn stays in flight while waiting (FR-13). Reject a `confirm_turn` or `discard_turn` with a wrong `turn_id`.
   Done when: state machine and flow tests cover confirm, edited confirm, discard, and wrong id.
@@ -152,7 +152,7 @@ Goal: timings visible, logs structured, vLLM path working, README done. Covers F
   Done when: the tests pass in CI-style `pytest` with no GPU needed.
 - [ ] **T5.6 Latency check.** Measure ASR + LLM first token for a 5 s utterance on each ASR model (target under about 3 s; not a hard gate). Record results and note any obvious hotspot for v1.
   Done when: the numbers are written down in a short notes section in this file or the README.
-- [x] **T5.7 README.** Write setup and run steps: uv sync, `.env` and `config.yaml`, running the server, running `compare_asr.py`, switching LLM backends. Update the project vision line so it matches the SPEC's "stepping stone" note.
+- [~] **T5.7 README.** (Written; the clean-checkout run is still to do.) Write setup and run steps: uv sync, `.env` and `config.yaml`, running the server, running `compare_asr.py`, switching LLM backends. Update the project vision line so it matches the SPEC's "stepping stone" note.
   Done when: someone can go from a fresh clone to a working chat in under 15 minutes, excluding model downloads (try it on a clean checkout).
 - [ ] **T5.8 Final acceptance pass.** Walk through every item in SPEC section 8 and tick it. Update SPEC status to Accepted, or list what is left.
   Done when: every acceptance box is ticked or has a noted follow-up.

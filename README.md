@@ -100,7 +100,7 @@ One adapter file plus one config entry. Write a class in `backend/asr/` that fol
 `asr.models` in `config.yaml` with its `adapter` path, `model_id` and `options`. The session code
 never special-cases a model.
 
-Available today: `whisper-large-v3`. Parakeet and Nemotron adapters (NeMo) are planned but not
+Available today: `whisper-large-v3` and `whisper-large-v3-turbo`. Parakeet and Nemotron adapters (NeMo) are planned but not
 written yet.
 
 ## Compare ASR models on a clip

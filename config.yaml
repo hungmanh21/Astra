@@ -11,6 +11,13 @@ asr:
         device: auto
         dtype: float16
 
+    whisper-large-v3-turbo:
+      adapter: backend.asr.whisper.WhisperASR
+      model_id: openai/whisper-large-v3-turbo
+      options:
+        device: auto
+        dtype: float16
+
 # Used from M3 on. LiteLLM model name; the key is GEMINI_API_KEY in .env.
 llm:
   model: gemini/gemini-3.5-flash-lite

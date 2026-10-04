@@ -257,16 +257,16 @@ astra/
 
 ## 8. Acceptance Criteria
 
-- [ ] I can open the UI on `localhost`, hold the mic button, speak, release, and see my transcript followed by a streamed LLM reply.
-- [ ] Switching the ASR model in the UI changes which model produces the transcript, with no server restart.
-- [ ] `scripts/compare_asr.py` runs every registered ASR adapter on the committed 10 s English fixture clip and prints, per model, the transcript and `asr_ms`. Every model returns non-empty text. (No WER threshold in v0; the reference transcript is there for manual comparison.)
-- [ ] Changing only config switches the LLM between Gemini and a local vLLM server.
-- [ ] Each turn displays audio duration, ASR time, LLM time to first token, LLM total time and end-to-end time.
-- [ ] Review mode: with the toggle on, I can edit the transcript before it reaches the LLM, or discard it and nothing is added to the history.
-- [ ] A failed ASR or LLM call shows an error in the chat and does not crash the session; history follows FR-14.
-- [ ] A recording over 30 s is stopped by the UI; a longer turn sent directly to the server is rejected with an error.
-- [ ] A `start_turn` sent while another turn is in flight is rejected and does not disturb the in-flight turn.
-- [ ] `README` steps let a fresh machine run the project in under 15 minutes (excluding model downloads).
+- [x] I can open the UI on `localhost`, hold the mic button, speak, release, and see my transcript followed by a streamed LLM reply. (Checked in Chrome, live with Whisper and Gemini. Safari was skipped.)
+- [x] Switching the ASR model in the UI changes which model produces the transcript, with no server restart. (Checked in Chrome with `whisper-large-v3` and `whisper-large-v3-turbo`, no restart. Parakeet and Nemotron will use the same mechanism.)
+- [ ] `scripts/compare_asr.py` runs every registered ASR adapter on the committed 10 s English fixture clip and prints, per model, the transcript and `asr_ms`. Every model returns non-empty text. (No WER threshold in v0; the reference transcript is there for manual comparison.) *Follow-up:* verified on the fixture clip for Whisper only (non-empty text, reference match apart from case and punctuation); Parakeet and Nemotron need the NeMo adapters (PLAN T4.1, T4.2).
+- [ ] Changing only config switches the LLM between Gemini and a local vLLM server. *Follow-up:* the Gemini side works; the vLLM side is wired through config but untried (PLAN T5.4).
+- [x] Each turn displays audio duration, ASR time, LLM time to first token, LLM total time and end-to-end time. (Checked in Chrome: 4.6 s audio, ASR 1.16 s, first token 847 ms, LLM 1.11 s, end to end 2.27 s.)
+- [x] Review mode: with the toggle on, I can edit the transcript before it reaches the LLM, or discard it and nothing is added to the history. (Chrome check by the user; the discard-adds-nothing rule is also covered by session tests.)
+- [x] A failed ASR or LLM call shows an error in the chat and does not crash the session; history follows FR-14. (Session and WebSocket tests for both failures and the FR-14 history rules; LLM failure seen in Chrome.)
+- [x] A recording over 30 s is stopped by the UI; a longer turn sent directly to the server is rejected with an error. (UI auto-stop checked in Chrome; the server rejection is tested end to end in `tests/test_edge_cases.py`.)
+- [x] A `start_turn` sent while another turn is in flight is rejected and does not disturb the in-flight turn. (`tests/test_edge_cases.py`, over a real WebSocket.)
+- [ ] `README` steps let a fresh machine run the project in under 15 minutes (excluding model downloads). *Follow-up:* the README is written but not tried on a clean checkout (the full `uv sync` download is slow on this connection).
 
 ## 9. Milestones
 
