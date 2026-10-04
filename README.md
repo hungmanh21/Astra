@@ -71,6 +71,7 @@ Environment variables (in `.env` or the shell):
 | `GEMINI_API_KEY` | Key for `gemini/...` models. LiteLLM reads provider keys from the environment |
 | `LLM_MODEL` | Overrides `llm.model` |
 | `LLM_API_BASE` | Overrides `llm.api_base` |
+| `LLM_API_KEY` | Optional key for an endpoint that wants one (sent as a bearer token) |
 | `DEBUG_SAVE_AUDIO=1` | Saves every received turn as a WAV in `debug_audio/` (off by default, for checking what the browser sent) |
 
 Example: `make run DEBUG_SAVE_AUDIO=1`.
@@ -81,10 +82,12 @@ All LLM calls go through [LiteLLM](https://docs.litellm.ai/), so the backend cha
 only.
 
 - **Gemini (default):** `llm.model: gemini/gemini-3.5-flash-lite` plus `GEMINI_API_KEY`.
-- **Local vLLM:** start a vLLM server with its OpenAI-compatible API, then set
-  `LLM_MODEL=hosted_vllm/<model-name>` and `LLM_API_BASE=http://localhost:<port>/v1`. Whisper and
-  vLLM share one GPU, so cap vLLM's memory (for example `--gpu-memory-utilization 0.6`). This path
-  is wired through config but has not been tried yet (PLAN T5.4).
+- **vLLM (or any OpenAI-compatible server):** vLLM runs wherever you started it; only its URL
+  matters. Set `LLM_MODEL=hosted_vllm/auto` and `LLM_API_BASE=http://<host>:<port>/v1`. With
+  `auto` the app asks the endpoint (`GET /models`) which model it serves on the first request and
+  uses the first one it lists, so the config never names it. To pin a model instead, write its
+  id: `LLM_MODEL=hosted_vllm/Qwen/Qwen2.5-1.5B-Instruct`. If the server was started with an API
+  key, set `LLM_API_KEY`. Not yet tried against a real server (PLAN T5.4).
 
 To check a model name and key before starting the server:
 

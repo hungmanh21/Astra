@@ -332,7 +332,7 @@ class Session:
             session_id=self.id,
             turn_id=turn.id,
             asr_model=turn.asr_model,
-            llm_model=self._settings.llm.model,
+            llm_model=self._llm.model,
             status=status,
             timings=timings,
             error=error,

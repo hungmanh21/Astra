@@ -73,3 +73,9 @@
 - Reason: the history budget is a safety net, so `estimate_tokens` (about 4 characters per token) is enough and avoids a tokenizer download. The session keeps one `WORKING` stage from `end_turn` until `llm_done` or `error`; the PLAN T3.4 list of finer states (transcribing, streaming) adds nothing the client can observe.
 - Rejected alternative: `litellm.token_counter` (model-specific and may fetch tokenizer files).
 - Constraint: trimming drops the oldest messages first, never the newest, and the history always starts with a user message. A failed LLM turn keeps its user message, so two user messages in a row are normal.
+
+## 2026-10-04: Discover the vLLM model from the endpoint (`hosted_vllm/auto`)
+- Reason: vLLM runs on another machine and the user gives only its URL. The served model is whatever that server was started with, so naming it in our config would go stale. With `llm.model: hosted_vllm/auto` (any provider prefix, name part exactly `auto`) the client asks `GET <api_base>/models` on the first request and uses the first model listed, keeping the prefix. The result is remembered, a failed lookup is retried next turn, and the turn log shows the real model name.
+- Rejected alternative: a separate `discover_model` flag, because one `LLM_MODEL` value is already the whole switch.
+- Constraint: `auto` needs `llm.api_base` (checked when settings load). The optional `LLM_API_KEY` is sent as a bearer token to the lookup and to the completion. This relaxes SPEC 6.5 ("model names are config values") in one way: the name may be resolved at run time. Nothing else in the code names a provider or model.
+

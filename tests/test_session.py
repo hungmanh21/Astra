@@ -1191,3 +1191,13 @@ def test_disconnect_with_no_turn_logs_nothing(caplog):
     with caplog.at_level(logging.INFO, logger=TURN_LOG):
         run(scenario)
     assert turn_records(caplog) == []
+
+
+def test_the_turn_log_names_the_model_the_llm_client_is_using(caplog):
+    # With `hosted_vllm/auto` the configured string is not the model; the client knows the real one.
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+
+    records = run_logged(caplog, scenario, llm=FakeLLM(model="hosted_vllm/Qwen/Qwen2.5-1.5B"))
+    assert records[0]["llm_model"] == "hosted_vllm/Qwen/Qwen2.5-1.5B"

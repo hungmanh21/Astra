@@ -186,7 +186,7 @@ The Nemotron registry key stays `nemotron-3.5-asr-streaming-0.6b` in the UI and 
   - Google: `model="gemini/<model-name>"`, key from `GEMINI_API_KEY`
   - vLLM: `model="hosted_vllm/<model-name>"`, `api_base="http://localhost:8000/v1"`
 - Streaming is required (FR-7); the first content delta marks `llm_ttft_ms`.
-- The exact Gemini and vLLM model names are config values chosen during planning; the SPEC only fixes the config shape (`LLM_MODEL`, optional `api_base`, keys from `.env`).
+- The exact Gemini and vLLM model names are config values chosen during planning; the SPEC only fixes the config shape (`LLM_MODEL`, optional `api_base`, keys from `.env`). A model name of `auto` (for example `hosted_vllm/auto`) means: ask the endpoint (`GET <api_base>/models`) and use the first model it lists (see DECISIONS.md, 2026-10-04).
 - System prompt lives in config (short, voice-friendly answers).
 - History is a list of `{role, content}` messages, trimmed to a max token budget (oldest turns dropped first; system prompt always kept).
 

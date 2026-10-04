@@ -21,12 +21,22 @@ class ConfigError(ValueError):
     """The config is missing something or contradicts itself. The message names the key."""
 
 
+# `hosted_vllm/auto`: ask the endpoint which model it serves instead of naming one (PLAN T5.4).
+AUTO_MODEL = "auto"
+
+
+def is_auto_model(model: str) -> bool:
+    """True when the part after the provider prefix is the AUTO_MODEL sentinel."""
+    return model.partition("/")[2] == AUTO_MODEL
+
+
 @dataclass(frozen=True)
 class LLMSettings:
     model: str  # LiteLLM model string, e.g. "gemini/<name>" or "hosted_vllm/<name>"
     api_base: str | None
     system_prompt: str
     max_history_tokens: int
+    api_key: str | None = None  # LLM_API_KEY, for an endpoint that wants one; None = not sent
 
 
 @dataclass(frozen=True)
@@ -92,9 +102,13 @@ def load_settings(
     llm_model = environ.get("LLM_MODEL", config["llm"]["model"])
     llm_api_base = environ.get("LLM_API_BASE", config["llm"].get("api_base"))
 
+    if is_auto_model(llm_model) and llm_api_base is None:
+        raise ConfigError(f"llm.model {llm_model!r} needs llm.api_base (or LLM_API_BASE) to ask")
+
     llm_settings = LLMSettings(
         model=llm_model,
         api_base=llm_api_base,
+        api_key=environ.get("LLM_API_KEY", "").strip() or None,
         system_prompt=config["llm"]["system_prompt"],
         max_history_tokens=config["llm"]["max_history_tokens"],
     )

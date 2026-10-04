@@ -130,7 +130,9 @@ class FakeLLM:
         gate: asyncio.Event | None = None,
         clock: FakeClock | None = None,
         delays: tuple[float, ...] = (),
+        model: str = "test/model",
     ) -> None:
+        self.model = model  # what the session logs as `llm_model`
         self.clock = clock
         self.delays = delays  # fake-clock seconds that pass before each delta
         self.deltas = deltas

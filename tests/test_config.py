@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.config import CONFIG_PATH, ConfigError, load_settings
+from backend.config import CONFIG_PATH, ConfigError, is_auto_model, load_settings
 
 YAML = """
 asr:
@@ -110,3 +110,47 @@ def test_the_real_config_yaml_loads():
     s = load_settings(environ={})
     assert s.default_asr_model in s.asr_models
     assert s.max_turn_seconds == 30
+
+
+def llm_yaml(model: str, api_base: str = "null") -> str:
+    return YAML.replace("model: gemini/test-model", f"model: {model}").replace(
+        "api_base: null", f"api_base: {api_base}"
+    )
+
+
+def test_llm_api_key_is_read_from_the_environment_and_defaults_to_none(tmp_path):
+    assert load_settings(write(tmp_path), environ={}).llm.api_key is None
+    assert load_settings(write(tmp_path), environ={"LLM_API_KEY": "  "}).llm.api_key is None
+    s = load_settings(write(tmp_path), environ={"LLM_API_KEY": "sk-1"})
+    assert s.llm.api_key == "sk-1"
+
+
+@pytest.mark.parametrize(
+    "model, expected",
+    [
+        ("hosted_vllm/auto", True),
+        ("openai/auto", True),
+        ("hosted_vllm/auto-7b", False),
+        ("hosted_vllm/Qwen/auto", False),
+        ("gemini/gemini-3.5-flash-lite", False),
+        ("auto", False),
+    ],
+)
+def test_is_auto_model(model, expected):
+    assert is_auto_model(model) is expected
+
+
+def test_auto_model_needs_an_api_base(tmp_path):
+    with pytest.raises(ConfigError, match="api_base"):
+        load_settings(write(tmp_path, llm_yaml("hosted_vllm/auto")), environ={})
+
+
+def test_auto_model_with_an_api_base_loads_from_yaml_or_environment(tmp_path):
+    path = write(tmp_path, llm_yaml("hosted_vllm/auto", "http://gpu:8000/v1"))
+    assert load_settings(path, environ={}).llm.model == "hosted_vllm/auto"
+
+    env = {"LLM_MODEL": "hosted_vllm/auto", "LLM_API_BASE": "http://gpu:8000/v1"}
+    assert load_settings(write(tmp_path), environ=env).llm.api_base == "http://gpu:8000/v1"
+    # The environment can also be what removes the endpoint's partner: auto without a base.
+    with pytest.raises(ConfigError, match="api_base"):
+        load_settings(write(tmp_path), environ={"LLM_MODEL": "hosted_vllm/auto"})
