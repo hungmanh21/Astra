@@ -1,12 +1,10 @@
 import { Recorder, SAMPLE_RATE } from "./recorder.js";
 
-const MAX_TURN_SECONDS = 30; // SPEC FR-12
 const RECONNECT_MAX_MS = 5000;
 
-// Same-origin by default. `?ws=ws://localhost:8000/ws` points the UI at another backend.
-const WS_URL =
-  new URLSearchParams(location.search).get("ws") ??
-  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+// Always the server that served the page: a URL override would let a crafted link send the
+// microphone audio somewhere else.
+const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -44,10 +42,11 @@ let retries = 0;
 
 let micReady = false;
 let phase = "idle"; // idle | recording | processing | reviewing
+let maxTurnSeconds = 30; // SPEC FR-12; replaced by the server's value from the `session` message
 let current = null; // the turn in flight, see newTurn()
 
 const recorder = new Recorder({
-  maxSeconds: MAX_TURN_SECONDS,
+  maxSeconds: maxTurnSeconds,
   onFrame,
   onStopped,
   onLimit: () => {
@@ -127,7 +126,7 @@ function render() {
     els.hint.textContent = "Click once to allow microphone access.";
   } else if (phase === "recording") {
     els.mic.textContent = "Release to send";
-    els.hint.textContent = `Recording, max ${MAX_TURN_SECONDS} s.`;
+    els.hint.textContent = `Recording, max ${maxTurnSeconds} s.`;
   } else if (phase === "processing") {
     els.mic.textContent = "Working…";
     els.hint.textContent = "Waiting for the reply.";
@@ -155,7 +154,14 @@ function endTurn() {
 }
 
 function failTurn() {
-  if (current) current.user.el.classList.add("failed");
+  if (current) {
+    const { el } = current.user;
+    el.classList.add("failed");
+    // A turn that fails during review must not leave a working Send or Discard behind.
+    el.querySelector(".actions")?.remove();
+    const textarea = el.querySelector("textarea");
+    if (textarea) textarea.disabled = true;
+  }
   endTurn();
 }
 
@@ -193,11 +199,13 @@ function onStopped(totalSamples) {
   send({ type: "end_turn" });
 }
 
-function enterReview() {
-  const { user } = current;
+// `transcript` is the server's text, not the bubble's: a blank one shows a placeholder there.
+function enterReview(transcript) {
+  const turn = current;
+  const { user } = turn;
   const textarea = document.createElement("textarea");
   textarea.rows = 2;
-  textarea.value = user.text.textContent;
+  textarea.value = transcript;
   user.text.classList.remove("pending");
   user.text.replaceChildren(textarea);
 
@@ -219,8 +227,8 @@ function enterReview() {
 
   sendBtn.addEventListener("click", () => {
     const text = textarea.value.trim();
-    if (!text) return;
-    send({ type: "confirm_turn", turn_id: current.id, text });
+    if (!text || current !== turn) return;
+    send({ type: "confirm_turn", turn_id: turn.id, text });
     setText(user, text);
     actions.remove();
     phase = "processing";
@@ -229,7 +237,8 @@ function enterReview() {
   });
 
   discardBtn.addEventListener("click", () => {
-    send({ type: "discard_turn", turn_id: current.id });
+    if (current !== turn) return;
+    send({ type: "discard_turn", turn_id: turn.id });
     user.el.remove();
     endTurn();
   });
@@ -279,7 +288,7 @@ function handleMessage(event) {
         .filter(Boolean)
         .join(" · ");
       if (current.review) {
-        enterReview();
+        enterReview(msg.text);
       } else {
         ensureAssistant();
       }
@@ -321,6 +330,10 @@ function onSession(msg) {
     }),
   );
   els.model.value = msg.asr_models.includes(saved) ? saved : msg.default_asr_model;
+  if (msg.max_turn_seconds > 0) {
+    maxTurnSeconds = msg.max_turn_seconds;
+    recorder.setMaxSeconds(maxTurnSeconds);
+  }
   if (hadSession) addNotice("Reconnected. The conversation history on the server was reset.");
   hadSession = true;
   render();

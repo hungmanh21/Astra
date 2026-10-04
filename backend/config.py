@@ -58,6 +58,11 @@ def _parse_flag(name: str, value: str) -> bool:
     raise ConfigError(f"{name} must be 1/true/yes or 0/false/no, got {value!r}")
 
 
+def _env(environ: Mapping[str, str], name: str) -> str | None:
+    """The stripped value of `name`, or None when it is missing or blank."""
+    return environ.get(name, "").strip() or None
+
+
 def load_settings(
     config_path: Path = CONFIG_PATH, environ: Mapping[str, str] | None = None
 ) -> Settings:
@@ -99,8 +104,9 @@ def load_settings(
         for name, model in config["asr"]["models"].items()
     }
 
-    llm_model = environ.get("LLM_MODEL", config["llm"]["model"])
-    llm_api_base = environ.get("LLM_API_BASE", config["llm"].get("api_base"))
+    # An empty line in .env (`LLM_MODEL=`) means "not set", not "use an empty string".
+    llm_model = _env(environ, "LLM_MODEL") or config["llm"]["model"]
+    llm_api_base = _env(environ, "LLM_API_BASE") or config["llm"].get("api_base")
 
     if is_auto_model(llm_model) and llm_api_base is None:
         raise ConfigError(f"llm.model {llm_model!r} needs llm.api_base (or LLM_API_BASE) to ask")
@@ -108,7 +114,7 @@ def load_settings(
     llm_settings = LLMSettings(
         model=llm_model,
         api_base=llm_api_base,
-        api_key=environ.get("LLM_API_KEY", "").strip() or None,
+        api_key=_env(environ, "LLM_API_KEY"),
         system_prompt=config["llm"]["system_prompt"],
         max_history_tokens=config["llm"]["max_history_tokens"],
     )

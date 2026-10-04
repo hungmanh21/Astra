@@ -6,7 +6,7 @@ export const SAMPLE_RATE = 16000;
 export class Recorder {
   // onFrame(arrayBuffer, totalSamples), onStopped(totalSamples), onLimit()
   constructor({ maxSeconds, onFrame, onStopped, onLimit }) {
-    this.maxSamples = Math.round(maxSeconds * SAMPLE_RATE);
+    this.setMaxSeconds(maxSeconds);
     this.onFrame = onFrame;
     this.onStopped = onStopped;
     this.onLimit = onLimit;
@@ -15,6 +15,11 @@ export class Recorder {
     this.active = false;
     this.runId = 0;
     this.total = 0;
+  }
+
+  // Takes effect from the next start(). Floor, so the turn never exceeds the server's byte cap.
+  setMaxSeconds(seconds) {
+    this.maxSamples = Math.floor(seconds * SAMPLE_RATE);
   }
 
   get sampleRate() {

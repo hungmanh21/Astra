@@ -6,11 +6,12 @@ Run with:
 then open http://localhost:8000
 """
 
+from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI, WebSocket
-from fastapi.concurrency import asynccontextmanager
 from fastapi.staticfiles import StaticFiles
 
 from backend.asr.registry import ASRRegistry
@@ -55,6 +56,9 @@ def create_app(
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
+        if not _same_origin(ws):
+            await ws.close(code=1008)  # policy violation; sent before accept, so an HTTP 403
+            return
         await ws.accept()
         transport = WebSocketTransport(ws)
         await transport.run(Session(transport, settings, transcriber, llm))
@@ -62,6 +66,19 @@ def create_app(
     # Mounted last so it does not shadow /ws.
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
     return app
+
+
+def _same_origin(ws: WebSocket) -> bool:
+    """True unless a browser on another site opened the socket.
+
+    Browsers do not apply the same-origin policy to WebSockets, so without this any page the
+    user visits could connect to localhost and spend the LLM key. Clients that send no Origin
+    (scripts, tests) are not browsers and are let through.
+    """
+    origin = ws.headers.get("origin")
+    if origin is None:
+        return True
+    return urlsplit(origin).netloc == ws.headers.get("host")
 
 
 def main() -> None:

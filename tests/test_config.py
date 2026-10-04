@@ -67,6 +67,14 @@ def test_env_overrides_llm_model_and_api_base(tmp_path):
     assert s.llm.api_base == "http://localhost:9000/v1"
 
 
+def test_blank_llm_env_values_fall_back_to_the_config(tmp_path):
+    # `LLM_MODEL=` left empty in .env must not replace the config model with "".
+    env = {"LLM_MODEL": "", "LLM_API_BASE": "  "}
+    s = load_settings(write(tmp_path), environ=env)
+    assert s.llm.model == "gemini/test-model"
+    assert s.llm.api_base is None
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [("1", True), ("true", True), ("YES", True), ("0", False), ("false", False), ("", False)],

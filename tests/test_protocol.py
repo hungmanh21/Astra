@@ -73,13 +73,14 @@ def test_server_messages_serialize_to_the_wire_shape():
         "turn_id": None,
         "message": "x",
     }
-    assert SessionInfo(session_id="s1", asr_models=["a", "b"], default_asr_model="a").model_dump(
-        mode="json"
-    ) == {
+    assert SessionInfo(
+        session_id="s1", asr_models=["a", "b"], default_asr_model="a", max_turn_seconds=30
+    ).model_dump(mode="json") == {
         "type": "session",
         "session_id": "s1",
         "asr_models": ["a", "b"],
         "default_asr_model": "a",
+        "max_turn_seconds": 30,
     }
     assert TurnStarted(turn_id="t1").model_dump(mode="json") == {
         "type": "turn_started",

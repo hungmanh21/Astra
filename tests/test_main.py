@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from backend.asr.base import TranscriptResult
 from backend.asr.service import TranscriptionService
@@ -65,6 +66,20 @@ def test_ws_sends_session_message_on_connect():
         msg = ws.receive_json()
     assert msg["type"] == "session"
     assert msg["asr_models"] == MODELS
+
+
+def test_ws_accepts_a_same_origin_browser():
+    client = TestClient(create_app(make_settings(), llm=FakeLLM()))
+    with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+        assert ws.receive_json()["type"] == "session"
+
+
+def test_ws_rejects_a_page_from_another_origin():
+    client = TestClient(create_app(make_settings(), llm=FakeLLM()))
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect("/ws", headers={"origin": "https://evil.example"}):
+            pass
+    assert exc_info.value.code == 1008
 
 
 def test_full_audio_turn_over_websocket(tmp_path):

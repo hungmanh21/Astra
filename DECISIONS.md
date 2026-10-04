@@ -83,3 +83,7 @@
 - Reason: the repo's real contribution is real-time ASR, so v0 stays on the Google API. The vLLM path is built and checked against a fake endpoint, only the real-server run is left.
 - Constraint: SPEC section 8 keeps the vLLM box open with this follow-up. NeMo adapters (Parakeet, Nemotron) and the M0 questions (Python version, Nemotron license) are also still open, and v1 streaming ASR is where the project goes next.
 
+
+## 2026-10-04: Same-origin WebSocket only; the server tells the UI the turn cap
+- Reason: browsers do not apply the same-origin policy to WebSockets, so any page the user visits could open `ws://localhost:8000/ws` and, through review mode, send any text to the LLM on the user's key. `/ws` now refuses a connection whose `Origin` does not match its `Host` (no `Origin` = not a browser, allowed). The UI's `?ws=` override is gone, since a crafted link could send the microphone audio to another server. The `session` message now carries `max_turn_seconds`, so the UI auto-stops at the server's cap instead of a hard-coded 30 s.
+- Rejected alternative: a configurable list of allowed origins, not needed while browser and backend run on the same machine.

@@ -63,6 +63,9 @@ class Turn:
     # Review mode (T4.6): the ASR result kept while the user edits, and when the wait began.
     transcription: Transcription | None = None
     review_started_at: float = 0.0
+    # Set by the turn's one log record. A disconnect while an error is still being sent would
+    # otherwise log the same turn a second time as "dropped".
+    recorded: bool = False
 
 
 class Session:
@@ -94,6 +97,7 @@ class Session:
                 session_id=self.id,
                 asr_models=list(self._settings.asr_models),
                 default_asr_model=self._settings.default_asr_model,
+                max_turn_seconds=self._settings.max_turn_seconds,
             )
         )
 
@@ -327,7 +331,10 @@ class Session:
         timings: Timings | None = None,
         error: str | None = None,
     ) -> None:
-        """Write the turn's one structured log line (T5.3). Call it once per turn."""
+        """Write the turn's one structured log line (T5.3). Later calls for the turn do nothing."""
+        if turn.recorded:
+            return
+        turn.recorded = True
         turnlog.log_turn(
             session_id=self.id,
             turn_id=turn.id,

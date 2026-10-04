@@ -48,6 +48,7 @@ class SessionInfo(BaseModel):
     session_id: str
     asr_models: list[str]
     default_asr_model: str
+    max_turn_seconds: float  # the UI auto-stops here, so it never sends a turn the server rejects
 
 
 class TurnStarted(BaseModel):

@@ -117,7 +117,7 @@ Client → server:
 - JSON `{"type": "reset"}` (clears history; rejected while a turn is in flight)
 
 Server → client:
-- JSON `{"type": "session", "session_id": "...", "asr_models": ["..."], "default_asr_model": "..."}` (sent once on connect)
+- JSON `{"type": "session", "session_id": "...", "asr_models": ["..."], "default_asr_model": "...", "max_turn_seconds": 30}` (sent once on connect; the UI auto-stops at `max_turn_seconds`, from `limits.max_turn_seconds`)
 - JSON `{"type": "turn_started", "turn_id": "..."}` (ack of `start_turn`; the id used by every later message of this turn)
 - JSON `{"type": "transcript", "turn_id": "...", "text": "...", "asr_ms": 0}`
 - JSON `{"type": "llm_delta", "turn_id": "...", "text": "..."}` (repeated)

@@ -93,6 +93,7 @@ def test_connect_sends_session_message():
     assert msg["session_id"]
     assert msg["asr_models"] == MODELS
     assert msg["default_asr_model"] == MODELS[0]
+    assert msg["max_turn_seconds"] == 30
 
 
 def test_start_turn_acks_with_turn_id():
@@ -1179,6 +1180,39 @@ def test_a_dropped_connection_is_logged_once_in_every_stage(caplog):
         records = run_logged(caplog, scenario, **kwargs)
         assert [r["status"] for r in records] == ["dropped"], scenario.__name__
         assert records[0]["error"] is None
+
+
+def test_a_disconnect_while_the_error_is_being_sent_does_not_log_the_turn_twice(caplog):
+    # The failure is logged before the `error` is sent; a disconnect during that send must not
+    # add a "dropped" record for the same turn.
+    class SlowErrorTransport(FakeTransport):
+        def __init__(self) -> None:
+            super().__init__()
+            self.sending_error = asyncio.Event()
+
+        async def send_json(self, data: dict[str, Any]) -> None:
+            if data["type"] == "error":
+                self.sending_error.set()
+                await asyncio.Event().wait()  # never returns; the disconnect cancels it
+            await super().send_json(data)
+
+    async def go():
+        transport = SlowErrorTransport()
+        session = Session(
+            transport,
+            make_settings(),
+            FakeTranscriber(error=ASRError("boom")),
+            FakeLLM(),
+        )
+        await session.on_connect()
+        await send_turn(session, pcm(0.5))
+        async with asyncio.timeout(2):
+            await transport.sending_error.wait()
+        await session.on_disconnect()
+
+    with caplog.at_level(logging.INFO, logger=TURN_LOG):
+        asyncio.run(go())
+    assert [r["status"] for r in turn_records(caplog)] == ["asr_error"]
 
 
 def test_disconnect_with_no_turn_logs_nothing(caplog):
