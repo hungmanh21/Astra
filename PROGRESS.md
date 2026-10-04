@@ -1,13 +1,14 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 6a82ba5 (Accept v0 with follow-ups; record compare_asr and clean-checkout results, defer vLLM real-server test)
-- Test status: 217 pytest tests passing (audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
+- Latest commit: 521f75e (Fix review-mode stale buttons and blank transcript, add WebSocket origin check, send the turn cap to the UI)
+- Test status: 221 pytest tests passing (audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
 - Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]`, `pyyaml`, `pydantic`, `python-dotenv` (plus the original audio libs); dev: `pytest`, `ruff`, `httpx`
 
 ## Completed
+- [x] Pre-PR review of v0 and fixes: review mode no longer pre-fills a blank transcript with "(no speech detected)"; a review turn that fails (disconnect or error) loses its Send/Discard, so stale buttons cannot confirm or discard the next turn; `/ws` refuses a cross-origin browser (HTTP 403) and the UI's `?ws=` override is gone; the `session` message carries `max_turn_seconds` and the UI auto-stops there (SPEC 6.3 updated); a turn is never logged twice when the client leaves while an error is being sent; blank `LLM_MODEL` / `LLM_API_BASE` in `.env` fall back to `config.yaml`. Frontend fixes checked with a throwaway Node harness (fails on the old code, passes on the new); origin check also tried against the real server
 - [x] Project scaffold: README, uv project, `.gitignore`
 - [x] Theory notes: `signal_basics.md`, `audio_representations.md` with runnable example
 - [x] `SPEC.md`, `PLAN.md`, `CLAUDE.md`, `PROGRESS.md`, `DECISIONS.md`
@@ -33,6 +34,9 @@
 - [~] T4.8 M4 check: waits for the NeMo adapters (Parakeet, Nemotron); Whisper is the only ASR for now. T4.4 and T4.5 are now seen with two Whisper models; Parakeet and Nemotron still wait for NeMo
 
 ## Known Issues
+- Review-mode frontend fixes (blank transcript, stale buttons after a failed turn) not yet re-checked in Chrome
+- Firefox unverified: it may refuse a mic stream in a 16 kHz `AudioContext`, and that error is thrown in `createMediaStreamSource`, outside the fallback in `recorder.js`
+- Review nits not done: `log_turn` silently ignores an unknown status; `parse_client_message` builds a `TypeAdapter` per message; a missing `config.yaml` key raises `KeyError` instead of `ConfigError`; `librosa`, `matplotlib`, `scipy` are app dependencies but only `theory/` uses them; `pyproject.toml` description is a placeholder
 - PyPI wheels download slowly from the dev machine (about 20-35 KB/s; Hugging Face is about 8 MB/s). `litellm` is installed now. Plan for extra time when a new dependency like NeMo is needed
 - `.venv` lives on `/mnt/d` (9p mount, about 65x slower for small files). Setting `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/astra` would fix that; not done yet (tried, reverted while bandwidth is bad)
 - `transformers` prints two warnings on Whisper load (a deprecated `generation_config` plus `begin_suppress_tokens` mix, and `clean_up_tokenization_spaces` for BPE). They come from the library defaults, not our kwargs; the output is correct. Revisit only if they get noisy
@@ -45,7 +49,8 @@
 - Whisper may emit text such as "Thank you." on silence or noise; not handled in v0, note what you see in M2
 
 ## Next Steps
-1. Decide what comes next: NeMo adapters and the M0 questions (T0.1, T0.3 to T0.5, T4.1 to T4.3, T4.8), or v1 streaming ASR (Nemotron chunked inference, VAD)
-2. T5.6 latency notes (skipped for now; the Whisper numbers are in Completed, plus turbo 416 ms vs large-v3 1507 ms ASR on the 9.9 s fixture clip)
-3. Optional: preload Whisper and import `litellm` at startup so the first turn is fast (needs a `config.yaml` flag; SPEC says lazy)
-4. Switch `compare_asr.py` to `load_settings` (T1.2) and shorten `ProtocolError` messages
+1. Merge the v0 PR into main (after a Chrome check of review mode)
+2. Decide what comes next: NeMo adapters and the M0 questions (T0.1, T0.3 to T0.5, T4.1 to T4.3, T4.8), or v1 streaming ASR (Nemotron chunked inference, VAD)
+3. T5.6 latency notes (skipped for now; the Whisper numbers are in Completed, plus turbo 416 ms vs large-v3 1507 ms ASR on the 9.9 s fixture clip)
+4. Optional: preload Whisper and import `litellm` at startup so the first turn is fast (needs a `config.yaml` flag; SPEC says lazy)
+5. Switch `compare_asr.py` to `load_settings` (T1.2) and shorten `ProtocolError` messages
