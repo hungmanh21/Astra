@@ -7,7 +7,7 @@ The long-term vision is streaming ASR with translation. What exists today is **v
 stone: a turn-based voice agent. You hold a button and speak, the audio goes to the backend over
 a WebSocket, a pluggable ASR model transcribes it, an LLM answers, and the reply streams into a
 chat page. v0 is English only, one turn at a time, and not real-time on purpose. It builds the
-seams (transport, ASR interface, LLM interface) that streaming will reuse. See `SPEC.md` for
+seams (transport, ASR interface, LLM interface) that streaming will reuse. See `SPEC_v0.md` for
 what v0 is and is not.
 
 ```
@@ -135,7 +135,7 @@ Tests use fake ASR and LLM, so they need no GPU, no model downloads and no API k
 | `tests/` | pytest suite and a small LibriSpeech fixture clip (CC BY 4.0) |
 | `theory/` | Learning notes on audio and ASR fundamentals. Not part of the app |
 
-Project documents: `SPEC.md` (requirements and acceptance), `PLAN.md` (tasks), `DECISIONS.md`
+Project documents: `SPEC_v0.md` / `SPEC_v1.md` (requirements and acceptance), `PLAN_v0.md` / `PLAN_v1.md` (tasks), `DECISIONS.md`
 (design decisions and why), `PROGRESS.md` (current state).
 
 ## Troubleshooting

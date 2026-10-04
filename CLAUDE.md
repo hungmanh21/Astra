@@ -4,10 +4,11 @@
 
 Astra: real-time ASR (including translation) with open-source Hugging Face models, aimed at live conversations, meetings and calls (see `README.md`).
 
-The current target is **v0**, a turn-based voice agent: browser push-to-talk → WebSocket → pluggable ASR → LiteLLM → streamed reply in a chat UI.
+v0 (done, merged) is a turn-based voice agent: browser push-to-talk → WebSocket → pluggable ASR → LiteLLM → streamed reply in a chat UI. The current target is **v1**: the same agent with live partial transcripts while the user speaks, and a bench for comparing streaming strategies (`chunked`, `redecode`, `trimmed` on Whisper first, then Nemotron `native`).
 
-- `SPEC.md`: what v0 is and how it should behave. Source of truth for requirements (FR-n) and acceptance criteria.
-- `PLAN.md`: v0 broken into tasks (T0.1 ... T5.8) with "Done when" checks. Tick tasks off as they finish.
+- `SPEC_v1.md`: what v1 adds and changes. Source of truth for v1 requirements (FR-15 on) and acceptance criteria. Everything it does not change is still defined by `SPEC_v0.md`.
+- `PLAN_v1.md`: v1 broken into tasks (S0.1 ... S5.4) with "Done when" checks. Tick tasks off as they finish.
+- `SPEC_v0.md`, `PLAN_v0.md`: the accepted v0 spec and plan. Section and task references in the existing code (`SPEC 6.3`, `PLAN T1.7`) point here; v1 code cites `SPEC_v1` sections and `S` task ids.
 - `PROGRESS.md`: current state of the code (see workflow below).
 - `DECISIONS.md`: important design decisions and why (see workflow below).
 - `theory/`: learning notes and runnable examples on audio and ASR fundamentals. Not part of the v0 app; leave it alone unless asked.
@@ -24,9 +25,10 @@ Target hardware for v0 is Linux (WSL2 is fine) with one NVIDIA GPU. The dev mach
 
 ## Conventions
 
-- Follow `SPEC.md`. If the code needs to deviate from the SPEC, or the SPEC is ambiguous, ask before deviating and update the SPEC once decided.
-- Work through `PLAN.md` in order and treat each task's "Done when" line as the definition of finished. Do not mark a task done without verifying that line.
-- v0 is English only, turn-based, one turn at a time per session. Do not add streaming ASR, VAD, TTS or translation to v0 (these are listed as non-goals).
+- Follow `SPEC_v1.md` (and `SPEC_v0.md` where v1 changes nothing). If the code needs to deviate from the SPEC, or the SPEC is ambiguous, ask before deviating and update the SPEC once decided.
+- Work through `PLAN_v1.md` in order and treat each task's "Done when" line as the definition of finished. Do not mark a task done without verifying that line.
+- v1 is English only, push-to-talk, one turn at a time per session, 30 s cap. Do not add VAD, long-form audio, TTS, WebRTC, translation or early (speculative) LLM calls to v1 (these are listed as non-goals).
+- Every ASR model streams. Strategies come from adapter capabilities (`open_stream` for `native`, `transcribe_segments` for `trimmed`; `chunked` and `redecode` work for any model), never from the model's name. The session never checks which kind of stream it has.
 - Session and turn logic must depend on the transport interface (`send_json`, `send_bytes`, `on_audio_frame`), not on FastAPI types directly, so WebRTC can replace the WebSocket later.
 - Adding an ASR model means one adapter file plus one config entry. Do not special-case models in the session code.
 - LLM access goes through LiteLLM only. Provider and model are config values, never hard-coded.

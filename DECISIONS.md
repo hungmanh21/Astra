@@ -87,3 +87,13 @@
 ## 2026-10-04: Same-origin WebSocket only; the server tells the UI the turn cap
 - Reason: browsers do not apply the same-origin policy to WebSockets, so any page the user visits could open `ws://localhost:8000/ws` and, through review mode, send any text to the LLM on the user's key. `/ws` now refuses a connection whose `Origin` does not match its `Host` (no `Origin` = not a browser, allowed). The UI's `?ws=` override is gone, since a crafted link could send the microphone audio to another server. The `session` message now carries `max_turn_seconds`, so the UI auto-stops at the server's cap instead of a hard-coded 30 s.
 - Rejected alternative: a configurable list of allowed origins, not needed while browser and backend run on the same machine.
+
+## 2026-10-04: v1 scope: live partials for the same agent, Whisper re-decode before Nemotron
+- Reason: smallest real-time step that reuses every v0 seam. Partials show while the button is held; the final transcript still goes to the LLM on release. Whisper re-decode (LocalAgreement-2) proves the protocol, session, coalescing and UI with models that already run, so the NeMo install risk (slow PyPI, Python version, Nemotron license) cannot block the seam. Nemotron native streaming then plugs into a tested interface.
+- Rejected alternative: a live transcription mode with no LLM and long-form audio (closer to the meetings vision, but needs long-form decoding; later); Nemotron first (NeMo blocks everything); VAD endpointing (push-to-talk stays for v1).
+- Constraint: docs split into `SPEC_v0.md` / `PLAN_v0.md` (accepted, cited by v0 code) and `SPEC_v1.md` / `PLAN_v1.md`. v1 FRs continue at FR-15, v1 tasks use `S` ids.
+
+## 2026-10-04: v1 compares streaming strategies, chosen per turn
+- Reason: v1 doubles as an experiment bench. The same model can stream as `chunked` (each chunk decoded once, independently), `redecode` (whole turn re-decoded, LocalAgreement-2), `trimmed` (re-decode since the last settled sentence, with the settled text as prompt) or `native` (model's own streaming, Nemotron). `compare_asr.py --stream --strategy all` and a UI dropdown compare them on latency and WER.
+- Rejected alternative: one strategy per config entry (e.g. `whisper-turbo-chunked`), because the registry would load the same weights twice.
+- Constraint: strategies come from adapter capabilities (`open_stream` → `native`, `transcribe_segments` → `trimmed`), never from model names. `chunked` is expected to lose accuracy (cut words, no context, Whisper pads every input to 30 s) and is measured, not gated.

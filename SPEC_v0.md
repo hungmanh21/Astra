@@ -196,8 +196,8 @@ Inside the existing `astra` uv project (root `pyproject.toml`; the `theory/` fol
 
 ```
 astra/
-  SPEC.md
-  PLAN.md
+  SPEC_v0.md
+  PLAN_v0.md
   pyproject.toml
   backend/
     main.py            # FastAPI app + /ws + static file serving
@@ -293,7 +293,7 @@ Still open:
 
 - [ ] Nemotron 3.5 access and license: availability notes on the Hugging Face pages conflict. Confirm in M0 that `nvidia/nemotron-3.5-asr-streaming-0.6b` downloads and that its license fits our use.
 - [ ] Python version: can NeMo run on the scaffold's Python 3.13, or must the project be pinned lower? Settled in M0.
-- [ ] Default Gemini model name and vLLM model name (config values, to be chosen in PLAN.md).
+- [ ] Default Gemini model name and vLLM model name (config values, to be chosen in PLAN_v0.md).
 
 ## 11. Notes / References
 
