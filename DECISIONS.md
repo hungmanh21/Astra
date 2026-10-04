@@ -79,3 +79,7 @@
 - Rejected alternative: a separate `discover_model` flag, because one `LLM_MODEL` value is already the whole switch.
 - Constraint: `auto` needs `llm.api_base` (checked when settings load). The optional `LLM_API_KEY` is sent as a bearer token to the lookup and to the completion. This relaxes SPEC 6.5 ("model names are config values") in one way: the name may be resolved at run time. Nothing else in the code names a provider or model.
 
+## 2026-10-04: Accept v0 on Gemini; defer the real vLLM test
+- Reason: the repo's real contribution is real-time ASR, so v0 stays on the Google API. The vLLM path is built and checked against a fake endpoint, only the real-server run is left.
+- Constraint: SPEC section 8 keeps the vLLM box open with this follow-up. NeMo adapters (Parakeet, Nemotron) and the M0 questions (Python version, Nemotron license) are also still open, and v1 streaming ASR is where the project goes next.
+

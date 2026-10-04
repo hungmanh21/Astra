@@ -146,15 +146,15 @@ Goal: timings visible, logs structured, vLLM path working, README done. Covers F
   Done when: every finished turn shows the five values.
 - [x] **T5.3 Structured logs.** (One JSON line per turn from `backend/turnlog.py`, never containing the transcript or reply.) One structured log record per turn with session id, turn id, model names, timings, and any error.
   Done when: a run produces parseable log lines that include failed turns.
-- [~] **T5.4 vLLM path.** (vLLM runs on another server and we are given its URL, so there is no local vLLM install and no shared-GPU budget to tune. The model is discovered from the endpoint with `hosted_vllm/auto`; implemented in `backend/config.py` and `backend/llm.py`; checked through real LiteLLM against a local fake endpoint. The real server is still to try.) Point the config at the endpoint with `LLM_MODEL=hosted_vllm/auto` and `LLM_API_BASE=http://<host>:<port>/v1` (and `LLM_API_KEY` if the server wants one).
+- [~] **T5.4 vLLM path.** (vLLM runs on another server and we are given its URL, so there is no local vLLM install and no shared-GPU budget to tune. The model is discovered from the endpoint with `hosted_vllm/auto`; implemented in `backend/config.py` and `backend/llm.py`; checked through real LiteLLM against a local fake endpoint. Deferred by decision: Gemini is the v0 LLM, the real-server test waits.) Point the config at the endpoint with `LLM_MODEL=hosted_vllm/auto` and `LLM_API_BASE=http://<host>:<port>/v1` (and `LLM_API_KEY` if the server wants one).
   Done when: changing only the config (no code changes) switches the reply source between Gemini and the vLLM endpoint, checked live with a real turn.
 - [x] **T5.5 Edge-case tests.** (`tests/test_edge_cases.py`.) Add end-to-end tests over a real WebSocket with fake ASR and LLM for: over-30 s turn rejected, `start_turn` during an in-flight turn, unknown ASR model, connection dropped mid-turn.
   Done when: the tests pass in CI-style `pytest` with no GPU needed.
 - [ ] **T5.6 Latency check.** Measure ASR + LLM first token for a 5 s utterance on each ASR model (target under about 3 s; not a hard gate). Record results and note any obvious hotspot for v1.
   Done when: the numbers are written down in a short notes section in this file or the README.
-- [~] **T5.7 README.** (Written; the clean-checkout run is still to do.) Write setup and run steps: uv sync, `.env` and `config.yaml`, running the server, running `compare_asr.py`, switching LLM backends. Update the project vision line so it matches the SPEC's "stepping stone" note.
+- [x] **T5.7 README.** (Tried on a clean clone; see SPEC section 8.) Write setup and run steps: uv sync, `.env` and `config.yaml`, running the server, running `compare_asr.py`, switching LLM backends. Update the project vision line so it matches the SPEC's "stepping stone" note.
   Done when: someone can go from a fresh clone to a working chat in under 15 minutes, excluding model downloads (try it on a clean checkout).
-- [ ] **T5.8 Final acceptance pass.** Walk through every item in SPEC section 8 and tick it. Update SPEC status to Accepted, or list what is left.
+- [x] **T5.8 Final acceptance pass.** (Every box ticked or carrying a follow-up; SPEC status set to Accepted with follow-ups.) Walk through every item in SPEC section 8 and tick it. Update SPEC status to Accepted, or list what is left.
   Done when: every acceptance box is ticked or has a noted follow-up.
 
 ---
