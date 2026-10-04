@@ -9,11 +9,13 @@ import logging
 from typing import Any
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from backend.asr.base import ASRError
+from backend.llm import LLMError
 from backend.session import Session, TurnStage
-from tests.helpers import MODELS, FakeLLM, FakeTranscriber, chunks, make_settings, pcm
+from tests.helpers import MODELS, FakeClock, FakeLLM, FakeTranscriber, chunks, make_settings, pcm
 
 
 class FakeTransport:
@@ -45,6 +47,7 @@ def run(
     scenario,
     transcriber: FakeTranscriber | None = None,
     llm: FakeLLM | None = None,
+    clock: FakeClock | None = None,
     **settings_kwargs,
 ):
     """Run `scenario(session, transport)` on a fresh connected session."""
@@ -54,6 +57,7 @@ def run(
         make_settings(**settings_kwargs),
         transcriber or FakeTranscriber(),
         llm or FakeLLM(),
+        **({"clock": clock} if clock else {}),
     )
 
     async def go():
@@ -384,7 +388,7 @@ def test_model_load_time_is_logged_only_when_the_model_was_loaded(caplog):
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="backend.session"):
         run(scenario, transcriber=FakeTranscriber(model_load_ms=0.0))
-    assert not any(r.levelno == logging.INFO for r in caplog.records)
+    assert not any(r.levelno == logging.INFO for r in caplog.records if r.name == "backend.session")
 
 
 def test_debug_wav_is_still_written_with_asr_on(tmp_path):
@@ -565,6 +569,31 @@ def test_llm_error_text_never_reaches_the_user():
         assert "secret" not in json.dumps(transport.sent)
 
     run(scenario, llm=FakeLLM(error=RuntimeError("secret internals")))
+
+
+def test_llm_error_is_logged_as_a_warning_without_a_second_traceback(caplog):
+    # llm.py already logged the details, so the session adds one line, not another traceback
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        assert transport.last("error")["message"] == "LLM request failed"
+
+    with caplog.at_level(logging.INFO, logger="backend.session"):
+        run(scenario, llm=FakeLLM(error=LLMError("LLM request failed")))
+    records = [
+        r for r in caplog.records if r.name == "backend.session" and r.levelno >= logging.WARNING
+    ]
+    assert len(records) == 1 and records[0].exc_info is None
+
+
+def test_unexpected_error_in_the_llm_step_keeps_its_traceback_in_the_log(caplog):
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+
+    with caplog.at_level(logging.INFO, logger="backend.session"):
+        run(scenario, llm=FakeLLM(error=RuntimeError("bug")))
+    assert any(r.exc_info for r in caplog.records)
 
 
 def test_history_is_trimmed_to_the_token_budget_oldest_first():
@@ -874,3 +903,291 @@ def test_disconnect_while_waiting_for_review_drops_the_turn():
         assert transport.last("error")["turn_id"] == "anything"
 
     run(scenario)
+
+
+# --- M5: timings with a fake clock (T5.1) ---
+# SPEC 6.3.2: asr_ms comes from the transcriber; llm_ttft_ms and llm_total_ms start when the
+# request is sent; e2e_ms runs from end_turn to the last delta, minus review think time.
+
+
+def timing_run(scenario, **fake_kwargs):
+    clock = FakeClock()
+    transcriber = FakeTranscriber(clock=clock, takes_s=0.3, asr_ms=250.0)
+    llm = FakeLLM(deltas=("A", "B"), clock=clock, delays=(0.5, 0.25), **fake_kwargs)
+
+    async def go(session, transport):
+        await scenario(session, transport, clock)
+
+    run(go, transcriber=transcriber, llm=llm, clock=clock)
+
+
+def test_timings_follow_the_spec_definitions():
+    async def scenario(session, transport, clock):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        t = transport.last("llm_done")["timings"]
+        assert t["audio_s"] == 0.5
+        assert t["asr_ms"] == 250.0  # the transcriber's own number, not the session clock
+        assert t["llm_ttft_ms"] == pytest.approx(500)
+        assert t["llm_total_ms"] == pytest.approx(750)
+        assert t["e2e_ms"] == pytest.approx(1050)  # 0.3 ASR + 0.75 LLM
+
+    timing_run(scenario)
+
+
+def test_e2e_starts_at_end_turn_not_at_start_turn():
+    async def scenario(session, transport, clock):
+        await session.on_json(start_msg())
+        clock.advance(5.0)  # the user is still talking
+        for frame in chunks(pcm(0.5)):
+            await session.on_audio_frame(frame)
+        await session.on_json(END)
+        await settle(session)
+        assert transport.last("llm_done")["timings"]["e2e_ms"] == pytest.approx(1050)
+
+    timing_run(scenario)
+
+
+def test_review_think_time_is_excluded_from_e2e_but_asr_time_counts():
+    async def scenario(session, transport, clock):
+        await review_turn(session)
+        clock.advance(10.0)  # the user reads and edits
+        await session.on_json(confirm_msg(transport.last("turn_started")["turn_id"], "hi"))
+        await settle(session)
+        t = transport.last("llm_done")["timings"]
+        assert t["e2e_ms"] == pytest.approx(1050)  # not 11050
+        assert t["llm_total_ms"] == pytest.approx(750)
+
+    timing_run(scenario)
+
+
+def test_blank_transcript_has_only_audio_and_asr_timings():
+    async def scenario(session, transport, clock):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        t = transport.last("llm_done")["timings"]
+        assert t["audio_s"] == 0.5 and t["asr_ms"] == 250.0
+        assert t["llm_ttft_ms"] is None
+        assert t["llm_total_ms"] is None
+        assert t["e2e_ms"] is None
+
+    clock = FakeClock()
+    run(
+        lambda session, transport: scenario(session, transport, clock),
+        transcriber=FakeTranscriber(text="", clock=clock, takes_s=0.3, asr_ms=250.0),
+        clock=clock,
+    )
+
+
+def test_a_reply_with_no_text_has_no_first_token_time():
+    async def scenario(session, transport, clock):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        t = transport.last("llm_done")["timings"]
+        assert t["llm_ttft_ms"] is None
+        assert t["llm_total_ms"] == 0
+        assert session.history == [{"role": "user", "content": "hello world"}]
+
+    clock = FakeClock()
+    run(
+        lambda session, transport: scenario(session, transport, clock),
+        llm=FakeLLM(deltas=()),
+        clock=clock,
+    )
+
+
+# --- M5: one structured log line per turn (T5.3) ---
+
+TURN_LOG = "astra.turns"
+TIMING_KEYS = {"audio_s", "asr_ms", "llm_ttft_ms", "llm_total_ms", "e2e_ms"}
+
+
+def turn_records(caplog):
+    """The parsed JSON of every astra.turns record. Fails if a line is not valid JSON."""
+    return [json.loads(r.getMessage()) for r in caplog.records if r.name == TURN_LOG]
+
+
+def run_logged(caplog, scenario, **kwargs):
+    with caplog.at_level(logging.INFO, logger=TURN_LOG):
+        run(scenario, **kwargs)
+    return turn_records(caplog)
+
+
+def test_a_good_turn_logs_one_ok_record_with_all_fields(caplog):
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        scenario.ids = (session.id, transport.last("turn_started")["turn_id"])
+
+    records = run_logged(caplog, scenario)
+    assert len(records) == 1
+    record = records[0]
+    session_id, turn_id = scenario.ids
+    assert record["event"] == "turn"
+    assert record["session_id"] == session_id
+    assert record["turn_id"] == turn_id
+    assert record["asr_model"] == MODELS[0]
+    assert record["llm_model"] == "test/model"
+    assert record["status"] == "ok"
+    assert record["error"] is None
+    assert set(record["timings"]) == TIMING_KEYS
+    assert record["timings"]["audio_s"] == 0.5
+    assert record["timings"]["asr_ms"] == 12.5
+    assert all(isinstance(v, int | float) for v in record["timings"].values())
+
+
+def test_the_logged_timings_are_the_ones_sent_to_the_browser(caplog):
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        scenario.sent = transport.last("llm_done")["timings"]
+
+    records = run_logged(caplog, scenario)
+    assert records[0]["timings"] == scenario.sent
+
+
+def test_the_log_never_contains_the_transcript_or_the_reply(caplog):
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+
+    run_logged(caplog, scenario, transcriber=FakeTranscriber(text="my secret sentence"))
+    lines = " ".join(r.getMessage() for r in caplog.records if r.name == TURN_LOG)
+    assert "secret" not in lines and "Hi there" not in lines
+
+
+def test_one_record_per_turn_across_several_turns(caplog):
+    async def scenario(session, transport):
+        for _ in range(3):
+            await send_turn(session, pcm(0.5))
+            await settle(session)
+
+    records = run_logged(caplog, scenario)
+    assert [r["status"] for r in records] == ["ok", "ok", "ok"]
+    assert len({r["turn_id"] for r in records}) == 3
+
+
+def test_a_blank_transcript_is_logged_as_empty(caplog):
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+
+    records = run_logged(caplog, scenario, transcriber=FakeTranscriber(text=""))
+    assert [r["status"] for r in records] == ["empty"]
+    assert records[0]["timings"]["llm_ttft_ms"] is None
+
+
+def test_an_asr_failure_is_logged_as_asr_error_at_warning(caplog):
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+
+    records = run_logged(
+        caplog, scenario, transcriber=FakeTranscriber(error=ASRError("secret internals"))
+    )
+    assert len(records) == 1
+    assert records[0]["status"] == "asr_error"
+    assert records[0]["error"] == "transcription failed"
+    assert records[0]["timings"] is None
+    turn_lines = [r for r in caplog.records if r.name == TURN_LOG]
+    assert turn_lines[0].levelno == logging.WARNING
+    assert "secret" not in turn_lines[0].getMessage()
+
+
+def test_an_llm_failure_is_logged_once_as_llm_error(caplog):
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+
+    records = run_logged(caplog, scenario, llm=FakeLLM(error=RuntimeError("secret")))
+    assert [r["status"] for r in records] == ["llm_error"]
+    assert records[0]["error"] == "LLM request failed"
+
+
+def test_an_llm_failure_after_review_confirm_is_logged_once(caplog):
+    async def scenario(session, transport):
+        await review_turn(session)
+        await session.on_json(confirm_msg(transport.last("turn_started")["turn_id"], "hi"))
+        await settle(session)
+
+    records = run_logged(caplog, scenario, llm=FakeLLM(error=RuntimeError("x")))
+    assert [r["status"] for r in records] == ["llm_error"]
+
+
+def test_rejected_audio_is_logged_with_the_error_text(caplog):
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.1))  # too short
+        scenario.shown = transport.last("error")["message"]
+
+    records = run_logged(caplog, scenario)
+    assert [r["status"] for r in records] == ["rejected"]
+    assert records[0]["error"] == scenario.shown
+    assert records[0]["timings"] is None
+
+
+def test_audio_over_the_cap_is_logged_once(caplog):
+    async def scenario(session, transport):
+        await session.on_json(start_msg())
+        for _ in range(4):
+            await session.on_audio_frame(pcm(0.6))
+        await session.on_json(END)
+
+    records = run_logged(caplog, scenario, max_turn_seconds=1)
+    assert [r["status"] for r in records] == ["rejected"]
+
+
+def test_discard_is_logged_at_info(caplog):
+    async def scenario(session, transport):
+        await review_turn(session)
+        await session.on_json(discard_msg(transport.last("turn_started")["turn_id"]))
+
+    records = run_logged(caplog, scenario)
+    assert [r["status"] for r in records] == ["discarded"]
+    assert [r.levelno for r in caplog.records if r.name == TURN_LOG] == [logging.INFO]
+
+
+def test_blank_confirm_is_logged_as_rejected(caplog):
+    async def scenario(session, transport):
+        await review_turn(session)
+        await session.on_json(confirm_msg(transport.last("turn_started")["turn_id"], "  "))
+
+    records = run_logged(caplog, scenario)
+    assert [r["status"] for r in records] == ["rejected"]
+    assert records[0]["error"] == "transcript is empty"
+
+
+def test_a_dropped_connection_is_logged_once_in_every_stage(caplog):
+    async def receiving(session, transport):
+        await session.on_json(start_msg())
+        await session.on_disconnect()
+
+    async def working(session, transport):
+        await send_turn(session, pcm(0.5))
+        await asyncio.sleep(0.02)
+        await session.on_disconnect()
+
+    async def reviewing(session, transport):
+        await review_turn(session)
+        await session.on_disconnect()
+
+    for scenario, kwargs in (
+        (receiving, {}),
+        (working, {"transcriber": FakeTranscriber(gate=asyncio.Event())}),
+        (reviewing, {}),
+    ):
+        caplog.clear()
+        records = run_logged(caplog, scenario, **kwargs)
+        assert [r["status"] for r in records] == ["dropped"], scenario.__name__
+        assert records[0]["error"] is None
+
+
+def test_disconnect_with_no_turn_logs_nothing(caplog):
+    async def scenario(session, transport):
+        await send_turn(session, pcm(0.5))
+        await settle(session)
+        caplog.clear()
+        await session.on_disconnect()
+
+    with caplog.at_level(logging.INFO, logger=TURN_LOG):
+        run(scenario)
+    assert turn_records(caplog) == []

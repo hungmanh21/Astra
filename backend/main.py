@@ -19,6 +19,7 @@ from backend.config import Settings, load_settings
 from backend.llm import LLMClient
 from backend.session import Session
 from backend.transport import WebSocketTransport
+from backend.turnlog import configure_logging
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -29,6 +30,8 @@ def create_app(
     llm: LLMClient | None = None,
 ) -> FastAPI:
     """Build the app. A factory, so tests can pass their own Settings, transcriber and LLM."""
+    configure_logging()  # uvicorn only sets up its own loggers; ours would be dropped
+
     settings = settings or load_settings()
 
     # Models stay lazy: nothing is loaded here, the first turn on a model loads it.

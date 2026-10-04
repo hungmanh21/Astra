@@ -188,3 +188,17 @@ def test_review_flow_over_the_websocket():
         done = ws.receive_json()
         assert done["type"] == "llm_done" and done["text"] == "OK"
     assert llm.calls[0][-1] == {"role": "user", "content": "edited"}  # the edit, not the ASR text
+
+
+def test_create_app_sets_up_logging_so_turn_lines_are_visible():
+    import logging
+
+    root = logging.getLogger()
+    saved = (root.handlers[:], root.level)
+    try:
+        root.setLevel(logging.WARNING)
+        create_app(make_settings(), llm=FakeLLM())
+        assert root.level == logging.INFO
+    finally:
+        root.handlers[:] = saved[0]
+        root.setLevel(saved[1])

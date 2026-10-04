@@ -1,6 +1,7 @@
 """Tests for backend/llm.py (PLAN T3.2). A fake `completion` stands in for litellm."""
 
 import asyncio
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -104,11 +105,27 @@ def test_failure_in_the_middle_keeps_the_deltas_already_yielded():
     assert got == ["A", "B"]
 
 
-def test_failure_is_logged_with_the_original_traceback(caplog):
-    completion = FakeCompletion([], fail_on_call=ConnectionError("boom"))
-    with pytest.raises(LLMError):
-        asyncio.run(collect(LLMClient(settings(), completion=completion)))
-    assert any(r.exc_info for r in caplog.records)
+def test_failure_is_logged_as_one_short_line_with_details_only_at_debug(caplog):
+    completion = FakeCompletion([], fail_on_call=ConnectionError("boom\nsecond line"))
+    with caplog.at_level(logging.DEBUG, logger="backend.llm"):
+        with pytest.raises(LLMError):
+            asyncio.run(collect(LLMClient(settings(), completion=completion)))
+
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1
+    assert errors[0].exc_info is None  # no multi-line traceback at the normal level
+    assert "ConnectionError: boom second line" in errors[0].getMessage()
+    assert "\n" not in errors[0].getMessage()
+    debug = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert any(r.exc_info for r in debug)  # the traceback is still there when asked for
+
+
+def test_a_very_long_error_message_is_cut_in_the_log(caplog):
+    completion = FakeCompletion([], fail_on_call=RuntimeError("x" * 5000))
+    with caplog.at_level(logging.ERROR, logger="backend.llm"):
+        with pytest.raises(LLMError):
+            asyncio.run(collect(LLMClient(settings(), completion=completion)))
+    assert len(caplog.records[0].getMessage()) < 500
 
 
 def test_cancellation_is_not_turned_into_llm_error():

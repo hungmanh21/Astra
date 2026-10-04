@@ -49,6 +49,19 @@ def chunks(data: bytes, size: int = 1600) -> list[bytes]:
     return [data[i : i + size] for i in range(0, len(data), size)]
 
 
+class FakeClock:
+    """A clock the test moves by hand. Pass it to Session(clock=...) and to the fakes."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class FakeTranscriber:
     """Stands in for TranscriptionService in session tests.
 
@@ -63,7 +76,11 @@ class FakeTranscriber:
         model_load_ms: float = 0.0,
         error: Exception | None = None,
         gate: asyncio.Event | None = None,
+        clock: FakeClock | None = None,
+        takes_s: float = 0.0,
     ) -> None:
+        self.clock = clock
+        self.takes_s = takes_s  # how far transcribe() moves the fake clock
         self.text = text
         self.asr_ms = asr_ms
         self.model_load_ms = model_load_ms
@@ -75,6 +92,8 @@ class FakeTranscriber:
 
     async def transcribe(self, model_name: str, audio: np.ndarray) -> Transcription:
         self.calls.append((model_name, audio))
+        if self.clock is not None:
+            self.clock.advance(self.takes_s)
         try:
             if self.gate is not None:
                 await self.gate.wait()
@@ -109,7 +128,11 @@ class FakeLLM:
         error: Exception | None = None,
         error_after: int = 0,
         gate: asyncio.Event | None = None,
+        clock: FakeClock | None = None,
+        delays: tuple[float, ...] = (),
     ) -> None:
+        self.clock = clock
+        self.delays = delays  # fake-clock seconds that pass before each delta
         self.deltas = deltas
         self.error = error
         self.error_after = error_after
@@ -123,6 +146,8 @@ class FakeLLM:
             for i, delta in enumerate(self.deltas):
                 if self.error is not None and i == self.error_after:
                     raise self.error
+                if self.clock is not None and i < len(self.delays):
+                    self.clock.advance(self.delays[i])
                 yield delta
                 if i == 0 and self.gate is not None:
                     await self.gate.wait()

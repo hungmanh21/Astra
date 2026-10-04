@@ -106,9 +106,9 @@ Goal: the transcript goes to the LLM and the reply streams into the chat, with a
   Done when: tests with a failing fake ASR and a failing fake LLM check history contents and that the next turn works.
 - [x] **T3.7 `reset` message.** Clear history when idle (FR-11).
   Done when: after a reset, the next reply shows no memory of earlier turns.
-- [ ] **T3.8 UI: streamed reply, disabled mic, errors.** Append `llm_delta` text live, disable the mic while a turn is in flight (FR-13), show errors as chat messages, add a reset button.
+- [x] **T3.8 UI: streamed reply, disabled mic, errors.** (Checked in Chrome by the user, including the bad-key case. The server log for that case was too noisy (about 80 lines), now one line.) Append `llm_delta` text live, disable the mic while a turn is in flight (FR-13), show errors as chat messages, add a reset button.
   Done when: in the browser the reply streams in, the mic is disabled until `llm_done` or `error`, and an invalid API key shows an error and the mic recovers.
-- [ ] **T3.9 M3 check.** Hold a short multi-turn conversation and confirm the model uses earlier turns.
+- [x] **T3.9 M3 check.** (Checked in Chrome by the user.) Hold a short multi-turn conversation and confirm the model uses earlier turns.
   Done when: a follow-up question such as "what did I just ask?" is answered correctly.
 
 ---
@@ -123,13 +123,13 @@ Goal: all three ASR models are selectable at runtime, and transcripts can be rev
   Done when: `compare_asr.py` prints a Nemotron row, and switching the checkpoint is a config-only edit.
 - [ ] **T4.3 Compare script over all models.** Confirm `compare_asr.py` covers all three, prints a small table, and returns non-empty text for each (AC).
   Done when: one run prints three rows with non-empty transcripts.
-- [ ] **T4.4 Runtime model selection.** Honor `asr_model` in `start_turn` (reject unknown keys with an `error`). Keep loaded models resident, with no eviction.
+- [x] **T4.4 Runtime model selection.** (Code and tests done; checked with one model only. Re-check the switch between two models when a second ASR model exists.) Honor `asr_model` in `start_turn` (reject unknown keys with an `error`). Keep loaded models resident, with no eviction.
   Done when: two consecutive turns with different models use different adapters with no restart, and the second turn on an already-used model has no load delay.
-- [ ] **T4.5 UI: model dropdown.** Fill the dropdown from the `session` message and send the selection with every `start_turn`.
+- [x] **T4.5 UI: model dropdown.** (Dropdown works with the single Whisper entry; the switch itself is re-checked together with T4.4.) Fill the dropdown from the `session` message and send the selection with every `start_turn`.
   Done when: changing the dropdown changes which model transcribes the next turn.
 - [x] **T4.6 Review mode (server).** (Blank `confirm_turn` text is an error that ends the turn, `discard_turn` sends nothing back, think time is excluded from `e2e_ms`.) With `review: true`, stop after `transcript` and wait for `confirm_turn` (edited text is what goes into history and to the LLM) or `discard_turn` (nothing added, turn ends). The turn stays in flight while waiting (FR-13). Reject a `confirm_turn` or `discard_turn` with a wrong `turn_id`.
   Done when: state machine and flow tests cover confirm, edited confirm, discard, and wrong id.
-- [ ] **T4.7 Review mode (UI).** Add the "review transcript" toggle (default off), an editable transcript box with Send and Discard buttons, and keep the mic disabled while reviewing.
+- [x] **T4.7 Review mode (UI).** (Checked in Chrome by the user.) Add the "review transcript" toggle (default off), an editable transcript box with Send and Discard buttons, and keep the mic disabled while reviewing.
   Done when: with the toggle on I can edit a transcript before it reaches the LLM, or discard it and see nothing added to the conversation.
 - [ ] **T4.8 M4 check.** Record the same sentence with all three models and compare transcripts and `asr_ms`.
   Done when: results are noted in the M4 notes below.
@@ -140,11 +140,11 @@ Goal: all three ASR models are selectable at runtime, and transcripts can be rev
 
 Goal: timings visible, logs structured, vLLM path working, README done. Covers FR-10 and the remaining acceptance criteria.
 
-- [ ] **T5.1 Timings.** Compute `audio_s`, `asr_ms`, `llm_ttft_ms`, `llm_total_ms`, `e2e_ms` as defined in SPEC 6.3.2 with a monotonic clock, and include them in `llm_done`.
+- [x] **T5.1 Timings.** (Fake-clock tests pass; `Session` takes an injectable `clock`.) Compute `audio_s`, `asr_ms`, `llm_ttft_ms`, `llm_total_ms`, `e2e_ms` as defined in SPEC 6.3.2 with a monotonic clock, and include them in `llm_done`.
   Done when: a unit test with fake clocks checks each definition, including that review-mode think time is excluded from `e2e_ms`.
 - [ ] **T5.2 Timings in the UI.** Show all five values under each turn (FR-10).
   Done when: every finished turn shows the five values.
-- [ ] **T5.3 Structured logs.** One structured log record per turn with session id, turn id, model names, timings, and any error.
+- [x] **T5.3 Structured logs.** (One JSON line per turn from `backend/turnlog.py`, never containing the transcript or reply.) One structured log record per turn with session id, turn id, model names, timings, and any error.
   Done when: a run produces parseable log lines that include failed turns.
 - [ ] **T5.4 vLLM path.** Choose the vLLM model, start a local vLLM server with a capped `--gpu-memory-utilization` (start near 0.6), and point the config at it with `hosted_vllm/<model>` and `api_base`. Measure real ASR memory use and adjust the cap if needed.
   Done when: changing only the config (no code changes) switches the reply source between Gemini and vLLM, and all three ASR models plus vLLM run at once without an out-of-memory error.

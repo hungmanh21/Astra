@@ -17,6 +17,12 @@ class LLMError(RuntimeError):
     """The LLM request failed, before or during the stream."""
 
 
+def _summary(exc: BaseException, limit: int = 300) -> str:
+    """`ExcType: first part of the message` on one line, for logs."""
+    text = " ".join(str(exc).split())
+    return f"{type(exc).__name__}: {text[:limit]}{'...' if len(text) > limit else ''}"
+
+
 class LLMClient:
     """Wraps `litellm.acompletion` as an async generator of text deltas.
 
@@ -44,6 +50,7 @@ class LLMClient:
         if completion is None:
             import litellm  # slow first import, so only when a real request is made
 
+            litellm.suppress_debug_info = True  # drops litellm's "Give Feedback / Get Help" banner
             completion = litellm.acompletion
 
         kwargs: dict[str, Any] = {
@@ -63,6 +70,8 @@ class LLMClient:
                     yield text
         except Exception as exc:
             # The message reaches the user; the original may hold internals, so only log it.
-            # CancelledError is not an Exception and passes through, which cancels a stream.
-            log.exception("LLM request failed")
+            # One short line: provider errors chain several long tracebacks. The full one is
+            # available at DEBUG. CancelledError is not an Exception and passes through.
+            log.error("LLM request failed: %s", _summary(exc))
+            log.debug("LLM request failure details", exc_info=True)
             raise LLMError("LLM request failed") from exc
