@@ -152,7 +152,7 @@ Goal: timings visible, logs structured, vLLM path working, README done. Covers F
   Done when: the tests pass in CI-style `pytest` with no GPU needed.
 - [ ] **T5.6 Latency check.** Measure ASR + LLM first token for a 5 s utterance on each ASR model (target under about 3 s; not a hard gate). Record results and note any obvious hotspot for v1.
   Done when: the numbers are written down in a short notes section in this file or the README.
-- [ ] **T5.7 README.** Write setup and run steps: uv sync, `.env` and `config.yaml`, running the server, running `compare_asr.py`, switching LLM backends. Update the project vision line so it matches the SPEC's "stepping stone" note.
+- [x] **T5.7 README.** Write setup and run steps: uv sync, `.env` and `config.yaml`, running the server, running `compare_asr.py`, switching LLM backends. Update the project vision line so it matches the SPEC's "stepping stone" note.
   Done when: someone can go from a fresh clone to a working chat in under 15 minutes, excluding model downloads (try it on a clean checkout).
 - [ ] **T5.8 Final acceptance pass.** Walk through every item in SPEC section 8 and tick it. Update SPEC status to Accepted, or list what is left.
   Done when: every acceptance box is ticked or has a noted follow-up.
