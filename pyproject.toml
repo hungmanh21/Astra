@@ -4,9 +4,42 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
+    "fastapi>=0.142.2",
     "librosa>=1.0.0",
+    "litellm>=1.103.2",
     "matplotlib>=3.11.2",
     "numpy>=2.5.3",
+    "pydantic>=2.13.5",
+    "python-dotenv>=1.2.3",
+    "pyyaml>=6.0.3",
     "scipy>=1.18.1",
     "soundfile>=0.14.0",
+    "torch>=2.14.0",
+    "transformers>=5.17.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "ruff>=0.16.9",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["theory"]  # learning notes, not part of the app
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # import sorting
+    "UP",     # modern syntax for the target Python version
+    "B",      # likely bugs
+    "ASYNC",  # blocking calls inside async code
 ]

@@ -1,0 +1,34 @@
+# Model registry and defaults (SPEC 6.2). Secrets live in .env, never here.
+# backend/config.py turns this file (plus .env) into a Settings object.
+
+asr:
+  default_model: whisper-large-v3
+  models:
+    whisper-large-v3:
+      adapter: backend.asr.whisper.WhisperASR
+      model_id: openai/whisper-large-v3
+      options:
+        device: auto
+        dtype: float16
+
+    whisper-large-v3-turbo:
+      adapter: backend.asr.whisper.WhisperASR
+      model_id: openai/whisper-large-v3-turbo
+      options:
+        device: auto
+        dtype: float16
+
+# Used from M3 on. LiteLLM model name; the key is GEMINI_API_KEY in .env.
+llm:
+  model: gemini/gemini-3.5-flash-lite
+  api_base: null
+  system_prompt: >
+    You are a voice assistant. The user's words come from speech recognition, so they may
+    contain small mistakes. Answer in one to three short sentences.
+  max_history_tokens: 4000
+
+limits:
+  max_turn_seconds: 30
+
+debug:
+  audio_dir: debug_audio # only used when DEBUG_SAVE_AUDIO=1

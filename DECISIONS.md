@@ -1,0 +1,89 @@
+# Design Decisions
+
+## 2026-09-30: v0 is a turn-based voice agent, not the final product
+- Reason: get the record → ASR → LLM → reply loop working and build the seams (transport, ASR interface, LLM interface) that v1 reuses for streaming
+- Constraint: translation and meeting/call use cases are out of scope for v0; README to be updated once v0 lands
+
+## 2026-09-30: Single process, single uv environment
+- Reason: least plumbing; one interface (the ASR adapter) instead of two
+- Rejected alternative: separate ASR service or per-model subprocess workers (extra interface to build in v0)
+- Constraint: if NeMo's PyTorch/CUDA pins cannot coexist with the other packages, move the NeMo adapters into a worker subprocess (decided in M0)
+
+## 2026-09-30: Transcript auto-sends to the LLM, with a review toggle
+- Reason: fastest default flow, while still allowing ASR debugging by editing or discarding a transcript
+- Rejected alternative: always require confirmation, or drop review mode entirely
+
+## 2026-09-30: Whisper via transformers, vanilla JS frontend
+- Reason: fewest moving parts for a baseline; the hard part is audio and WebSocket, not UI
+- Rejected alternative: faster-whisper, React/Vite
+- Constraint: revisit faster-whisper if Whisper speed matters
+
+## 2026-09-30: 30 s recording cap, one turn at a time, LLM streaming required
+- Reason: matches Whisper's 30 s window so no chunking logic is needed; avoids cancellation plumbing (that belongs to v1 barge-in); time to first token needs streaming
+- Rejected alternative: longer or uncapped recordings, cancel/queue turns, optional streaming
+
+## 2026-09-30: On failure, keep the user transcript, drop the failed reply
+- Reason: an ASR failure adds nothing; an LLM failure keeps the transcript so context is not lost and the user just speaks again
+- Rejected alternative: roll back the whole turn, retry button
+
+## 2026-09-30: Nemotron checkpoint id is a config value, with an English fallback
+- Reason: Nemotron 3.5 availability and license are unconfirmed
+- Constraint: fallback is `nvidia/nemotron-speech-streaming-en-0.6b`; registry key stays `nemotron-3.5-asr-streaming-0.6b`
+
+## 2026-09-30: Acceptance test for ASR is an offline script with a fixture clip
+- Reason: repeatable and needs no browser; the reference transcript allows manual comparison
+- Rejected alternative: UI-only checks, WER pass/fail threshold in v0
+
+## 2026-09-30: Whisper only for now; NeMo adapters deferred
+- Reason: dev hardware is now an RTX 3060 (12 GB), not the H100 the SPEC assumed; NeMo compatibility work (Python version, PyTorch pins) is not needed until the Parakeet and Nemotron adapters (M4)
+- Constraint: the "all three models plus local vLLM resident" plan does not fit 12 GB; revisit at M4. Gemini is the practical LLM until then
+
+## 2026-09-30: Frontend built first, against a protocol mock
+- Reason: the WebSocket protocol in SPEC 6.3 is the contract, so the UI (and the browser-specific audio risk) can be built and verified before the backend exists
+- Rejected alternative: mock inside the frontend JS (cannot verify audio bytes arrive intact), separate dev server or Vite build (contradicts the no-build-step decision)
+- Constraint: `frontend/` shares no code with `backend/`; the WebSocket URL defaults to same-origin and can be overridden with `?ws=`. `scripts/mock_server.py` is throwaway and is deleted once `backend/main.py` replaces it
+
+## 2026-09-30: Server rejects turns shorter than 0.25 s
+- Reason: push-to-talk taps would otherwise send empty or near-empty audio to ASR; the client has already sent `start_turn` by then, so the server is the one to reject
+- Constraint: added to SPEC 6.3.1
+
+## 2026-10-01: Ruff for lint and format, wired into `make check`
+- Reason: one fast tool for both linting and formatting; `make check` is what the session workflow in CLAUDE.md runs
+- Constraint: rules E, F, I, UP, B, ASYNC; line length 100; `theory/` excluded (learning notes). Python only, so `frontend/` has no linter yet
+
+## 2026-10-01: PROGRESS.md is committed together with the work
+- Reason: PROGRESS.md should describe the repo as of the commit that contains it (done, in progress, next), so it is updated before committing and goes in the same commit.
+- Constraint: a commit cannot contain its own hash, so "Latest commit" names the previous commit.
+
+## 2026-10-01: Transport seam is a send-side Protocol plus a handler the transport drives
+- Reason: `Transport` (send_json, send_bytes) is what the session sends through; the transport's receive loop calls `Session.on_json` / `on_audio_frame`. Session code imports no FastAPI types, so WebRTC can replace the WebSocket later (SPEC 6.3 seam).
+- Constraint: in M1 the session answers a valid `end_turn` with an "ASR is not connected yet" error so the frontend unlocks; T2.7 replaces that with the transcription.
+
+## 2026-10-03: PROGRESS.md is updated after committing and left uncommitted
+- Reason: after each work commit, PROGRESS.md is updated to name that commit and the new state, then left modified. The uncommitted diff shows what is new since the last commit, and PROGRESS.md always names a real hash. It is committed together with the next batch of work.
+- Rejected alternative: committing PROGRESS.md in the same commit (it could only name the previous commit) or in a separate "Update PROGRESS.md" commit (noise in the history).
+- Constraint: supersedes the 2026-10-01 "PROGRESS.md is committed together with the work" entry.
+
+## 2026-10-03: Default LLM is gemini/gemini-3.5-flash-lite
+- Reason: cheapest and fastest of the current Gemini line, which suits short voice answers. It is a config value (`llm.model`, overridable with `LLM_MODEL`), never hard-coded. The key is `GEMINI_API_KEY` in `.env`.
+- Rejected alternative: `gemini-2.5-flash` (Google lists the 2.5 series for shutdown on 2026-10-16); `gemini-3.5-flash` (slower, costlier, answers are one to three sentences anyway).
+- Constraint: the exact model ID is checked for the first time in T3.2 against the real API. If it is wrong, change `config.yaml` only.
+
+## 2026-10-03: M3 history is trimmed by an estimate, and one WORKING stage covers ASR and LLM
+- Reason: the history budget is a safety net, so `estimate_tokens` (about 4 characters per token) is enough and avoids a tokenizer download. The session keeps one `WORKING` stage from `end_turn` until `llm_done` or `error`; the PLAN T3.4 list of finer states (transcribing, streaming) adds nothing the client can observe.
+- Rejected alternative: `litellm.token_counter` (model-specific and may fetch tokenizer files).
+- Constraint: trimming drops the oldest messages first, never the newest, and the history always starts with a user message. A failed LLM turn keeps its user message, so two user messages in a row are normal.
+
+## 2026-10-04: Discover the vLLM model from the endpoint (`hosted_vllm/auto`)
+- Reason: vLLM runs on another machine and the user gives only its URL. The served model is whatever that server was started with, so naming it in our config would go stale. With `llm.model: hosted_vllm/auto` (any provider prefix, name part exactly `auto`) the client asks `GET <api_base>/models` on the first request and uses the first model listed, keeping the prefix. The result is remembered, a failed lookup is retried next turn, and the turn log shows the real model name.
+- Rejected alternative: a separate `discover_model` flag, because one `LLM_MODEL` value is already the whole switch.
+- Constraint: `auto` needs `llm.api_base` (checked when settings load). The optional `LLM_API_KEY` is sent as a bearer token to the lookup and to the completion. This relaxes SPEC 6.5 ("model names are config values") in one way: the name may be resolved at run time. Nothing else in the code names a provider or model.
+
+## 2026-10-04: Accept v0 on Gemini; defer the real vLLM test
+- Reason: the repo's real contribution is real-time ASR, so v0 stays on the Google API. The vLLM path is built and checked against a fake endpoint, only the real-server run is left.
+- Constraint: SPEC section 8 keeps the vLLM box open with this follow-up. NeMo adapters (Parakeet, Nemotron) and the M0 questions (Python version, Nemotron license) are also still open, and v1 streaming ASR is where the project goes next.
+
+
+## 2026-10-04: Same-origin WebSocket only; the server tells the UI the turn cap
+- Reason: browsers do not apply the same-origin policy to WebSockets, so any page the user visits could open `ws://localhost:8000/ws` and, through review mode, send any text to the LLM on the user's key. `/ws` now refuses a connection whose `Origin` does not match its `Host` (no `Origin` = not a browser, allowed). The UI's `?ws=` override is gone, since a crafted link could send the microphone audio to another server. The `session` message now carries `max_turn_seconds`, so the UI auto-stops at the server's cap instead of a hard-coded 30 s.
+- Rejected alternative: a configurable list of allowed origins, not needed while browser and backend run on the same machine.
