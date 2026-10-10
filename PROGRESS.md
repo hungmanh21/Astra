@@ -1,17 +1,18 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 521f75e (Fix review-mode stale buttons and blank transcript, add WebSocket origin check, send the turn cap to the UI)
+- Latest commit: 65b97d7 (Split docs into v0 and v1; add the v1 spec and plan for streaming partials and strategy comparison)
 - Test status: 221 pytest tests passing (audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
 - Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]`, `pyyaml`, `pydantic`, `python-dotenv` (plus the original audio libs); dev: `pytest`, `ruff`, `httpx`
 
 ## Completed
+- [x] v1 S0.1: v0 docs renamed to `SPEC_v0.md` / `PLAN_v0.md`; `SPEC_v1.md` and `PLAN_v1.md` written and approved (live partials while recording; strategies `chunked`, `redecode`, `trimmed`, `native` chosen per turn and compared on latency and WER; Whisper first, Nemotron in S4); CLAUDE.md, README and DECISIONS updated. Branch `v1` pushed to origin
 - [x] Pre-PR review of v0 and fixes: review mode no longer pre-fills a blank transcript with "(no speech detected)"; a review turn that fails (disconnect or error) loses its Send/Discard, so stale buttons cannot confirm or discard the next turn; `/ws` refuses a cross-origin browser (HTTP 403) and the UI's `?ws=` override is gone; the `session` message carries `max_turn_seconds` and the UI auto-stops there (SPEC 6.3 updated); a turn is never logged twice when the client leaves while an error is being sent; blank `LLM_MODEL` / `LLM_API_BASE` in `.env` fall back to `config.yaml`. Frontend fixes checked with a throwaway Node harness (fails on the old code, passes on the new); origin check also tried against the real server
 - [x] Project scaffold: README, uv project, `.gitignore`
 - [x] Theory notes: `signal_basics.md`, `audio_representations.md` with runnable example
-- [x] `SPEC.md`, `PLAN.md`, `CLAUDE.md`, `PROGRESS.md`, `DECISIONS.md`
+- [x] `SPEC_v0.md`, `PLAN_v0.md` (then `SPEC.md`, `PLAN.md`), `CLAUDE.md`, `PROGRESS.md`, `DECISIONS.md`
 - [x] Frontend (T1.9, T1.10): chat UI, push-to-talk, AudioWorklet to 16 kHz PCM16, WebSocket client, review mode, timings display, reconnect. Tried in a browser against the mock and working
 - [x] ASR pipeline code and tests: `backend/audio.py` (T1.7), `backend/asr/{base,registry,whisper,service}.py` (T2.1, T2.2, T2.3 code, T2.6 code), `scripts/compare_asr.py`
 - [x] M1 backend scaffold (stubs with TODO blocks for you to implement): `backend/{config,protocol,transport,session,main}.py`, `config.yaml` llm/limits/debug sections, `.env.example`, `make run`, test stubs. `.env` and `debug_audio/` are git-ignored
@@ -31,7 +32,8 @@
 - [x] Worklet and recorder logic checked with stubbed Node tests (resampling at 48k/44.1k/16k, 30 s cap, stale-message handling)
 
 ## In Progress
-- [~] T4.8 M4 check: waits for the NeMo adapters (Parakeet, Nemotron); Whisper is the only ASR for now. T4.4 and T4.5 are now seen with two Whisper models; Parakeet and Nemotron still wait for NeMo
+- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 5%: docs done (S0.1), no code yet. Next is S0.2
+- [~] v0 follow-ups not in v1: real vLLM server test (PLAN_v0 T5.4). NeMo adapters and the M0 questions moved into PLAN_v1 S4
 
 ## Known Issues
 - Review-mode frontend fixes (blank transcript, stale buttons after a failed turn) not yet re-checked in Chrome
@@ -49,8 +51,7 @@
 - Whisper may emit text such as "Thank you." on silence or noise; not handled in v0, note what you see in M2
 
 ## Next Steps
-1. Merge the v0 PR into main (after a Chrome check of review mode)
-2. Decide what comes next: NeMo adapters and the M0 questions (T0.1, T0.3 to T0.5, T4.1 to T4.3, T4.8), or v1 streaming ASR (Nemotron chunked inference, VAD)
-3. T5.6 latency notes (skipped for now; the Whisper numbers are in Completed, plus turbo 416 ms vs large-v3 1507 ms ASR on the 9.9 s fixture clip)
-4. Optional: preload Whisper and import `litellm` at startup so the first turn is fast (needs a `config.yaml` flag; SPEC says lazy)
-5. Switch `compare_asr.py` to `load_settings` (T1.2) and shorten `ProtocolError` messages
+1. S0.2: switch `compare_asr.py` to `load_settings` and record the v0 baseline numbers
+2. S1: streaming seam with a fake model (interface types, config, `partial` protocol message, `StreamingTranscription`, service, session wiring, turn log, edge-case tests)
+3. S2: Whisper strategies (`compare_asr.py --stream` first, then `chunked`, LocalAgreement-2 + `redecode`, Whisper segments, `trimmed`, then compare and tune)
+4. S3 UI partials, then S4 NeMo and Nemotron, then S5 measurements and acceptance
