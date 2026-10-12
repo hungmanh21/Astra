@@ -14,12 +14,12 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from backend.asr.registry import ASRModelConfig, ASRRegistry  # noqa: E402
+from backend.asr.registry import ASRRegistry  # noqa: E402
+from backend.config import load_settings  # noqa: E402
 
 SAMPLE_RATE = 16_000
 
@@ -35,17 +35,7 @@ def load_wav(path: Path) -> np.ndarray:
 
 
 def load_registry() -> ASRRegistry:
-    # Replace with the config loader once PLAN T1.2 exists.
-    config = yaml.safe_load((ROOT / "config.yaml").read_text())
-    models = {
-        name: ASRModelConfig(
-            adapter=entry["adapter"],
-            model_id=entry["model_id"],
-            options=entry.get("options") or {},
-        )
-        for name, entry in config["asr"]["models"].items()
-    }
-    return ASRRegistry(models)
+    return ASRRegistry(load_settings().asr_models)
 
 
 def main() -> None:

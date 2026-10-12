@@ -44,6 +44,10 @@ def test_record_is_one_json_line_with_exactly_the_documented_keys(caplog):
             "llm_ttft_ms": 400.0,
             "llm_total_ms": 900.0,
             "e2e_ms": 1300.0,
+            "stream_strategy": None,
+            "partial_count": None,
+            "partial_lag_ms": None,
+            "final_ms": None,
         },
         "error": None,
     }

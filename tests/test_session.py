@@ -1000,7 +1000,17 @@ def test_a_reply_with_no_text_has_no_first_token_time():
 # --- M5: one structured log line per turn (T5.3) ---
 
 TURN_LOG = "astra.turns"
-TIMING_KEYS = {"audio_s", "asr_ms", "llm_ttft_ms", "llm_total_ms", "e2e_ms"}
+TIMING_KEYS = {
+    "audio_s",
+    "asr_ms",
+    "llm_ttft_ms",
+    "llm_total_ms",
+    "e2e_ms",
+    "stream_strategy",
+    "partial_count",
+    "partial_lag_ms",
+    "final_ms",
+}
 
 
 def turn_records(caplog):
@@ -1034,7 +1044,9 @@ def test_a_good_turn_logs_one_ok_record_with_all_fields(caplog):
     assert set(record["timings"]) == TIMING_KEYS
     assert record["timings"]["audio_s"] == 0.5
     assert record["timings"]["asr_ms"] == 12.5
-    assert all(isinstance(v, int | float) for v in record["timings"].values())
+    # The streaming values are None for a batch turn (they get real values from S1.6 on).
+    numbers = {k: v for k, v in record["timings"].items() if v is not None}
+    assert all(isinstance(v, int | float) for k, v in numbers.items() if k != "stream_strategy")
 
 
 def test_the_logged_timings_are_the_ones_sent_to_the_browser(caplog):

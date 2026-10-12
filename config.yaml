@@ -3,6 +3,12 @@
 
 asr:
   default_model: whisper-large-v3
+  # Live partials (SPEC_v1 6.5). Starting values; S2.7 tunes them from compare_asr.py --stream.
+  streaming:
+    default_strategy: redecode # for models without native streaming
+    partial_interval_ms: 500 # least new audio between two partial decodes (redecode, trimmed)
+    partial_min_audio_ms: 1000 # no partial before this much audio (Whisper invents text on tiny clips)
+    chunk_ms: 500 # chunk length for the `chunked` strategy
   models:
     whisper-large-v3:
       adapter: backend.asr.whisper.WhisperASR

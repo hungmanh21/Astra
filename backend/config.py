@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+from backend.asr.base import GENERIC_STRATEGIES
 from backend.asr.registry import ASRModelConfig
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
@@ -40,6 +41,16 @@ class LLMSettings:
 
 
 @dataclass(frozen=True)
+class StreamingSettings:
+    """The `asr.streaming` section (SPEC_v1 6.5). A missing key keeps its default here."""
+
+    default_strategy: str = "redecode"  # for models without native streaming
+    partial_interval_ms: int = 500  # least new audio between two partial decodes
+    partial_min_audio_ms: int = 1000  # no partial before this much audio
+    chunk_ms: int = 500  # chunk length for the `chunked` strategy
+
+
+@dataclass(frozen=True)
 class Settings:
     asr_models: dict[str, ASRModelConfig]  # in config order
     default_asr_model: str
@@ -47,6 +58,7 @@ class Settings:
     max_turn_seconds: float
     debug_save_audio: bool
     debug_audio_dir: Path  # absolute, resolved against the repo root
+    asr_streaming: StreamingSettings = StreamingSettings()
 
 
 def _parse_flag(name: str, value: str) -> bool:
@@ -61,6 +73,40 @@ def _parse_flag(name: str, value: str) -> bool:
 def _env(environ: Mapping[str, str], name: str) -> str | None:
     """The stripped value of `name`, or None when it is missing or blank."""
     return environ.get(name, "").strip() or None
+
+
+def _streaming_settings(section: Mapping | None) -> StreamingSettings:
+    """Turn the `asr.streaming` YAML section into a StreamingSettings (PLAN_v1 S1.2).
+
+    Input:  section - the parsed `asr.streaming` mapping, or None when the YAML has no
+            such section (older configs, the test YAML). Any key may be missing.
+    Output: StreamingSettings. A missing key keeps the dataclass default.
+    Raises: ConfigError, naming the key (e.g. "asr.streaming.chunk_ms"), when
+              - partial_interval_ms, partial_min_audio_ms or chunk_ms is not a
+                positive int (0, -5, "fast" are all errors),
+              - default_strategy is not in GENERIC_STRATEGIES. "native" and "trimmed" are
+                refused too: they only exist for some models, and this default is for
+                models that have neither capability.
+    """
+    defaults = StreamingSettings()
+    section = section or {}
+
+    durations = {}
+    for key in ("partial_interval_ms", "partial_min_audio_ms", "chunk_ms"):
+        value = section.get(key, getattr(defaults, key))
+        # bool is an int subclass, so `chunk_ms: true` would otherwise pass.
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ConfigError(f"asr.streaming.{key} must be a positive int, got {value!r}")
+        durations[key] = value
+
+    default_strategy = section.get("default_strategy", defaults.default_strategy)
+    if default_strategy not in GENERIC_STRATEGIES:
+        raise ConfigError(
+            f"asr.streaming.default_strategy must be one of {GENERIC_STRATEGIES}, "
+            f"got {default_strategy!r}"
+        )
+
+    return StreamingSettings(default_strategy=default_strategy, **durations)
 
 
 def load_settings(
@@ -126,4 +172,5 @@ def load_settings(
         max_turn_seconds=config["limits"]["max_turn_seconds"],
         debug_save_audio=_parse_flag("DEBUG_SAVE_AUDIO", environ.get("DEBUG_SAVE_AUDIO", "")),
         debug_audio_dir=CONFIG_PATH.parent / config["debug"]["audio_dir"],
+        asr_streaming=_streaming_settings(config["asr"].get("streaming")),
     )
