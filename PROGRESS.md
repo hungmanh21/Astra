@@ -1,13 +1,14 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 65b97d7 (Split docs into v0 and v1; add the v1 spec and plan for streaming partials and strategy comparison)
-- Test status: 221 pytest tests passing (audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
+- Latest commit: 442d639 (Add streaming types, asr.streaming config and partial protocol messages (S1.1-S1.3))
+- Test status: 260 pytest tests passing (audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
 - Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]`, `pyyaml`, `pydantic`, `python-dotenv` (plus the original audio libs); dev: `pytest`, `ruff`, `httpx`
 
 ## Completed
+- [x] v1 S1.1-S1.3: streaming types in `backend/asr/base.py` (`PartialResult`, `ASRStream`, `StreamingASRModel`, `Segment`, `SegmentedASRModel`, strategy constants), `asr.streaming` config with validation (`StreamingSettings`), protocol: `partial` message, `stream_strategy` on `start_turn`/`transcript`/`timings`, `stream_strategies` on `session`. `tests/fakes.py` has the fake streaming and segmented adapters. Written by you, tests and stubs by Claude
 - [x] v1 S0.1: v0 docs renamed to `SPEC_v0.md` / `PLAN_v0.md`; `SPEC_v1.md` and `PLAN_v1.md` written and approved (live partials while recording; strategies `chunked`, `redecode`, `trimmed`, `native` chosen per turn and compared on latency and WER; Whisper first, Nemotron in S4); CLAUDE.md, README and DECISIONS updated. Branch `v1` pushed to origin
 - [x] Pre-PR review of v0 and fixes: review mode no longer pre-fills a blank transcript with "(no speech detected)"; a review turn that fails (disconnect or error) loses its Send/Discard, so stale buttons cannot confirm or discard the next turn; `/ws` refuses a cross-origin browser (HTTP 403) and the UI's `?ws=` override is gone; the `session` message carries `max_turn_seconds` and the UI auto-stops there (SPEC 6.3 updated); a turn is never logged twice when the client leaves while an error is being sent; blank `LLM_MODEL` / `LLM_API_BASE` in `.env` fall back to `config.yaml`. Frontend fixes checked with a throwaway Node harness (fails on the old code, passes on the new); origin check also tried against the real server
 - [x] Project scaffold: README, uv project, `.gitignore`
@@ -32,7 +33,7 @@
 - [x] Worklet and recorder logic checked with stubbed Node tests (resampling at 48k/44.1k/16k, 30 s cap, stale-message handling)
 
 ## In Progress
-- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 5%: docs done (S0.1), no code yet. Next is S0.2
+- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 15%: S0.1, S1.1, S1.2, S1.3 done. S0.2 half done (`compare_asr.py` uses `load_settings`; baseline numbers not recorded yet). Turn log already carries the four streaming timing fields (via `Timings.model_dump`), so S1.7 only lacks its test
 - [~] v0 follow-ups not in v1: real vLLM server test (PLAN_v0 T5.4). NeMo adapters and the M0 questions moved into PLAN_v1 S4
 
 ## Known Issues
@@ -51,7 +52,7 @@
 - Whisper may emit text such as "Thank you." on silence or noise; not handled in v0, note what you see in M2
 
 ## Next Steps
-1. S0.2: switch `compare_asr.py` to `load_settings` and record the v0 baseline numbers
-2. S1: streaming seam with a fake model (interface types, config, `partial` protocol message, `StreamingTranscription`, service, session wiring, turn log, edge-case tests)
-3. S2: Whisper strategies (`compare_asr.py --stream` first, then `chunked`, LocalAgreement-2 + `redecode`, Whisper segments, `trimmed`, then compare and tune)
-4. S3 UI partials, then S4 NeMo and Nemotron, then S5 measurements and acceptance
+1. S0.2: run `compare_asr.py` on the fixture for both Whisper models and record the baseline `asr_ms` in PLAN_v1 Notes
+2. S1.4: `StreamingTranscription` (`backend/asr/streaming.py`): coalescing, one decode in flight
+3. S1.5-S1.8: service and strategy lookup, session wiring, turn-log test, edge cases over a real WebSocket
+4. S2: Whisper strategies, then S3 UI partials, S4 NeMo and Nemotron, S5 measurements

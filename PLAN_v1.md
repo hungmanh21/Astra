@@ -31,7 +31,7 @@ Goal: v1 documents in place, plus the numbers v1 must beat.
 
 - [x] **S0.1 Split the docs.** Rename `SPEC.md` to `SPEC_v0.md` and `PLAN.md` to `PLAN_v0.md`, add `SPEC_v1.md` and `PLAN_v1.md`, and update every link to them (CLAUDE.md, README, PROGRESS). Add a DECISIONS entry for the v1 scope.
   Done when: no link or instruction outside `.venv` and `theory/` points at `SPEC.md` or `PLAN.md` (mentions of the rename itself are fine), and `make check` passes.
-- [ ] **S0.2 Baseline and `compare_asr.py` cleanup.** Switch `compare_asr.py` to `load_settings` (v0 Next Step). Record the v0 numbers: `asr_ms` on the fixture clip and on a ~5 s live utterance (Chrome timings line) for both Whisper models.
+- [x] **S0.2 Baseline and `compare_asr.py` cleanup.** Switch `compare_asr.py` to `load_settings` (v0 Next Step). Record the v0 numbers: `asr_ms` on the fixture clip and on a ~5 s live utterance (Chrome timings line) for both Whisper models.
   Done when: `compare_asr.py` reads models through `load_settings`, and the baseline table is in the Notes below.
 
 ---
@@ -129,7 +129,14 @@ Goal: native streaming. Mind the slow PyPI downloads (PROGRESS Known Issues).
 
 ## Notes
 
-- **Baseline (S0.2):** _to fill in._ Known so far: on the 9.9 s fixture, `asr_ms` is 1507 ms for large-v3 and 416 ms for turbo; a 4.6 s live utterance gave large-v3 `asr_ms` 1.16 s and first token 847 ms.
+- **Baseline (S0.2),** v0 batch `transcribe` on the 9.9 s fixture (`librispeech_1272-128104-0003.wav`), fp16, RTX 3060, via `compare_asr.py` (2026-10-12):
+
+  | Model | `asr_ms` | Cold load | Text |
+  |---|---|---|---|
+  | `whisper-large-v3` | 1499 | 112 s (first load, includes reading the weights from `/mnt/d`) | correct, "Leighton" |
+  | `whisper-large-v3-turbo` | 385 | 6.2 s | one word differs: "Layton" for "Leighton" |
+
+  Earlier runs on the same clip gave 1507 ms (large-v3) and 416 ms (turbo), so the numbers are stable to within about 10%. Live in Chrome, one 4.6 s utterance on large-v3 gave `asr_ms` 1.16 s and first token 847 ms. Turbo has no live number yet; S5.1 records one.
 - **Why chunks are not free for Whisper:** Whisper pads every input to a 30 s window, so its encoder costs about the same for 0.5 s as for 20 s. A decode's cost grows mostly with the number of output tokens (the decoder). So `chunked` saves less time than it seems and loses context, while `redecode` costs more per partial as the text grows (on large-v3, a long turn may take well over 1 s per decode). `trimmed` keeps the decoded text short. S2.7 measures all three.
 - **Strategy results (S2.2-S2.7):** _to fill in._
 - **Testing:** real model weights stay out of pytest, as in v0. A test that needs NeMo or the weights is skipped when they are missing.
