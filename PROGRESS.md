@@ -1,7 +1,7 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 442d639 (Add streaming types, asr.streaming config and partial protocol messages (S1.1-S1.3))
+- Latest commit: 3fa6480 (Record the v0 Whisper baseline on the fixture clip (S0.2))
 - Test status: 260 pytest tests passing (audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
@@ -33,7 +33,7 @@
 - [x] Worklet and recorder logic checked with stubbed Node tests (resampling at 48k/44.1k/16k, 30 s cap, stale-message handling)
 
 ## In Progress
-- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 15%: S0.1, S1.1, S1.2, S1.3 done. S0.2 half done (`compare_asr.py` uses `load_settings`; baseline numbers not recorded yet). Turn log already carries the four streaming timing fields (via `Timings.model_dump`), so S1.7 only lacks its test
+- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 15%: S0.1, S0.2, S1.1, S1.2, S1.3 done (baseline: large-v3 1499 ms, turbo 385 ms on the 9.9 s fixture, in PLAN_v1 Notes). Turn log already carries the four streaming timing fields (via `Timings.model_dump`), so S1.7 only lacks its test
 - [~] v0 follow-ups not in v1: real vLLM server test (PLAN_v0 T5.4). NeMo adapters and the M0 questions moved into PLAN_v1 S4
 
 ## Known Issues
@@ -52,7 +52,6 @@
 - Whisper may emit text such as "Thank you." on silence or noise; not handled in v0, note what you see in M2
 
 ## Next Steps
-1. S0.2: run `compare_asr.py` on the fixture for both Whisper models and record the baseline `asr_ms` in PLAN_v1 Notes
-2. S1.4: `StreamingTranscription` (`backend/asr/streaming.py`): coalescing, one decode in flight
-3. S1.5-S1.8: service and strategy lookup, session wiring, turn-log test, edge cases over a real WebSocket
-4. S2: Whisper strategies, then S3 UI partials, S4 NeMo and Nemotron, S5 measurements
+1. S1.4: implement `StreamingTranscription` in `backend/asr/streaming.py` (stub with `TODO(you)` and `tests/test_streaming.py` are in place, uncommitted; 16 tests fail until it is implemented). Coalescing, one decode in flight
+2. S1.5-S1.8: service and strategy lookup, session wiring, turn-log test, edge cases over a real WebSocket
+3. S2: Whisper strategies, then S3 UI partials, S4 NeMo and Nemotron, S5 measurements
