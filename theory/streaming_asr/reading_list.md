@@ -40,6 +40,15 @@ The key point to check while reading: **streamability is mostly about the decode
 
 ### Finalized notes
 
+1. **Three families, by what one output step is conditioned on:**
+   - **CTC**: the label at frame *t* depends only on the audio (the encoder output). Given the audio, it does not depend on the other labels.
+   - **RNN-T / transducer**: the label depends on the encoder frame *t* **and** on every non-blank label emitted so far (the prediction network). The alignment is still monotonic in time.
+   - **AED (attention encoder-decoder)**: the next token depends on **all** earlier tokens and on the **whole** encoder output, through cross-attention. The model has no fixed alignment to time.
+2. **Why production streams with transducers and offline benchmarks favour AED:**
+   - Transducers stream by construction. Output is frame-synchronous and monotonic, so a token is emitted as its audio arrives and never revised. The prediction network acts as an internal language model, so it beats CTC without an external LM. Models can be small (Gboard's was 80 MB) and endpointing fits in naturally.
+   - Offline, latency is free. Full-context attention and a strong implicit LM, trained at Whisper's scale (680k hours of weakly supervised audio), win on accuracy and robustness. Nothing forces the model to commit before it has heard everything.
+   - In short, accuracy with full context points to AED. Accuracy under a latency budget points to transducers.
+
 ---
 
 ## 1. Attention encoder-decoder (AED): why it does not stream naturally
@@ -60,6 +69,10 @@ The key point to check while reading: **streamability is mostly about the decode
 
 ### Finalized notes
 
+1. **What an AED decoder needs from the future:** every decoding step attends over every encoder frame. In Whisper the encoder is bidirectional too, so each frame's representation already depends on all the audio, future included. With only the first second, the encoder states are not the ones the model was trained on, and the decoder does not know the audio stops because the speaker has not finished yet. It can still end the sentence cleanly, guess a cut-off last word, invent a continuation, or emit nothing. The model has no way to say "wait for more audio".
+2. **How an AED decides it is finished:** it emits `<|endoftext|>` (EOS) once it judges that the transcript covers the input. While audio is still arriving, the end of the buffer is not the end of speech, but the model reads it as the end. So EOS fires early, the last word gets guessed, or text is invented to fill the gap. That is why streaming Whisper needs an outside rule to decide which words are safe. LocalAgreement waits for two decodes to agree on a word. AlignAtt stops when attention reaches the edge of the buffer.
+3. **The cost of Whisper's 30 s padding:** the encoder always processes 30 s (3000 mel frames, 1500 encoder positions), so its cost is the same for 0.5 s as for 20 s. Only the decoder's cost grows with the length, through the number of output tokens. For `chunked`, 500 ms chunks mean 20 full encoder passes for 10 s of audio instead of one. Each chunk is also mostly padding, which is where text like "Thank you." gets invented on silence. Chunks therefore save less time than they seem to and lose context (PLAN_v1 Notes, "Why chunks are not free for Whisper").
+
 ---
 
 ## 2. CTC
@@ -77,6 +90,9 @@ The key point to check while reading: **streamability is mostly about the decode
    > Your answer:
 
 ### Finalized notes
+
+1. **The blank and the collapsing rule:** there are many more frames than letters, so each frame needs a way to output "nothing", and that is the blank (ε). It also separates real repeats: "ll" in "hello" has to come out as `l ε l`. Collapsing turns a frame path into text: first merge consecutive duplicates, then delete the blanks. For example, `h h ε e l l ε l o o` gives `hello`. Training sums the probability of every path that collapses to the target, computed with a forward-backward dynamic program over the alignment lattice.
+2. **The independence assumption:** each frame's output distribution depends only on the encoder output, so greedy decoding is just argmax per frame. With a streaming encoder, a frame's label is final as soon as that frame is encoded, and nothing to its left needs revisiting. The cost is that no output step sees earlier outputs, so the model has no internal language model. It can spell the same word differently within one utterance and confuse homophones ("their" and "there"), and it needs a big encoder or an external n-gram LM (`pyctcdecode`, section 9.3) to fix that. The hybrid CTC/attention paper uses CTC for what it is good at: a monotonic alignment that keeps attention from skipping or looping, plus faster convergence. The attention decoder supplies the language modelling.
 
 ---
 
@@ -100,6 +116,15 @@ The key point to check while reading: **streamability is mostly about the decode
 
 ### Finalized notes
 
+1. **The three parts:**
+   - **Encoder**: audio becomes one acoustic vector per frame, as in CTC.
+   - **Prediction network**: the non-blank labels emitted so far become a state vector, which works like a small language model.
+   - **Joint network**: combines encoder frame *t* and prediction state *u* into a distribution over vocabulary plus blank.
+
+   Decoding walks a (time, label) lattice. A blank means "move to the next frame". A label is emitted and the model stays on the same frame, so one frame can emit several tokens. Unlike CTC, every output is conditioned on the earlier outputs, and there is no repeat-collapsing rule.
+2. **Why already-processed output is final:** greedy decoding moves left to right through time. Once frame *t* is consumed, its tokens are emitted and the decoder state moves on. With a cache-aware encoder, the outputs for past frames do not change when new audio arrives (the right context is fixed and caches only add to it), so nothing ever needs re-decoding. That is why `native` reports everything as `committed` and never sends `tentative` text (SPEC_v1 6.4). Latency comes from the chunk size plus look-ahead, not from waiting for agreement. Beam search could reorder hypotheses, but we decode greedily.
+3. **Emission delay:** the time from a word being spoken to its token being emitted. The loss sums over all alignments and only cares about the output sequence, not when tokens appear. Emitting later lets the model see more audio first (more look-ahead), which makes the prediction more confident, so training for accuracy alone drifts towards late alignments. FastEmit adds a regularizer that rewards emitting a token over emitting a blank, which pulls emissions earlier at a small cost in WER.
+
 ---
 
 ## 4. TDT (Token-and-Duration Transducer)
@@ -116,6 +141,9 @@ The key point to check while reading: **streamability is mostly about the decode
 
 ### Finalized notes
 
+1. **What TDT adds:** the joint network has two heads. One gives a token distribution (blank included) and the other gives a **duration**: how many frames that token covers, out of a small set such as {0, 1, 2, 3, 4}. After each step the decoder jumps ahead by the predicted duration instead of exactly one frame on a blank or zero frames on a token. So it can skip frames that hold no new information.
+2. **Why RNN-T is slow and how TDT avoids it:** an RNN-T makes at least one joint call per encoder frame, and most of those calls only output a blank (there are far fewer tokens than frames, even at Fast Conformer's 80 ms per frame). Every call is a sequential, GPU-unfriendly step, so the decode loop dominates inference time. TDT replaces runs of blanks with one step and a duration, which cuts the number of decode steps. The paper reports up to 2.82x faster inference with equal or better accuracy. It is the reason Parakeet TDT has such high throughput.
+
 ---
 
 ## 5. Making attention stream (optional, for depth)
@@ -129,6 +157,10 @@ The key point to check while reading: **streamability is mostly about the decode
    > Your answer:
 
 ### Finalized notes
+
+1. **What each gives up:**
+   - **MoChA** changes the model. Attention moves forward monotonically and only looks at a small chunk around its current position. It loses global attention: it cannot look back over the whole utterance or far ahead, which costs some accuracy. Training is also harder (an expected-attention approximation), and the model has to be trained this way.
+   - **Two-pass** keeps a full-attention LAS decoder but uses it only at the end. A streaming RNN-T supplies the partials, and LAS rescores or re-decodes once the utterance finishes. It gives up a little final latency (under 200 ms extra in the paper) and the guarantee that the final text matches the partials. It also runs two decoders. Our `redecode` has the same shape (fast partials, one full decode at release), except that both passes use the same expensive Whisper.
 
 ---
 
@@ -153,6 +185,13 @@ The key point to check while reading: **streamability is mostly about the decode
 
 ### Finalized notes
 
+1. **Why the encoder must be limited too:** with full self-attention, each encoder output depends on every frame, future ones included. When new audio arrives, all earlier encoder outputs change, so the whole utterance has to be re-encoded and anything decoded from it may change. The decoder type does not help. **Look-ahead (right context)** is how many future frames each frame may attend to. It adds that much latency directly and buys accuracy. **Left context** is how many past frames it may attend to. It adds no latency, but costs compute and cache memory, and too little of it hurts accuracy.
+2. **Buffered and cache-aware streaming:**
+   - **Buffered**: run an *offline* model on overlapping windows (new chunk plus some left and right audio), recompute the overlap every step, and merge the outputs. It needs no special training, but the compute is redundant, and the edges of each window lack the context the model was trained with.
+   - **Cache-aware**: the model is *trained* with limited context masks and causal convolutions. At inference it keeps per-layer attention keys and values plus convolution states, so each frame goes through the encoder exactly once. Training matches inference, and nothing is recomputed.
+   - Of ours, `trimmed` is the closest to buffered streaming: a window from the trim point to now, re-decoded every step. `redecode` is the extreme case, where the window is the whole turn. `chunked` is buffered with no overlap at all.
+3. **Where Nemotron's chunk sizes come from:** the attention mask, through `att_context_size = [left, right]`. Fast Conformer downsamples 8x, so one encoder frame is 80 ms. The right context sets how many frames make up one chunk: 0, 1, 6 or 13 extra frames give 80, 160, 560 or 1120 ms (to confirm against the checkpoint in S4.3). A bigger chunk means each frame sees more future audio, so accuracy is better but latency is higher. The model is trained with several context sizes, so one checkpoint serves them all.
+
 ---
 
 ## 7. Forcing an offline AED (Whisper) to stream: our S2 strategies
@@ -173,6 +212,10 @@ The key point to check while reading: **streamability is mostly about the decode
    > Your answer:
 
 ### Finalized notes
+
+1. **Which wastes more compute:** LocalAgreement. Every step re-encodes **and** fully re-decodes the whole buffer, regenerating text that is already committed, and it needs two decodes to commit a word. AlignAtt also has to re-encode the buffer (Whisper's encoder cannot run incrementally), but it keeps the committed tokens as decoder context instead of regenerating them. It decodes only the new tokens and stops per token as soon as attention reaches the unfinished edge. That means fewer decoder steps, and words are emitted after one pass rather than two.
+2. **Why trim at sentences and pass a prompt:** a sentence end is a natural pause, and Whisper's segment timestamps are reliable there. Cutting there leaves no half-word at the start of the remaining audio. The prompt (the committed text) restores the context that trimming removed, which keeps casing, punctuation, names and style consistent across the cut. Trimming at an arbitrary point would cut words in half, and Whisper would then drop, duplicate or invent them. Committed text and the remaining audio could also fall out of step, with a word in the committed text whose audio is still in the buffer, or the reverse.
+3. **Which of ours suffers most from cut words:** `chunked`. It cuts every `chunk_ms` with no overlap, no agreement and no context, so a word that straddles a boundary gets split into two fragments, mangled, or lost.
 
 ---
 
@@ -198,6 +241,13 @@ The key point to check while reading: **streamability is mostly about the decode
    > Your answer:
 
 ### Finalized notes
+
+1. **Why transducers for streaming:** streaming is native (monotonic, frame-synchronous output that needs no re-decoding). Latency is low and can be tuned (chunk and look-ahead, FastEmit). The models are compact enough for a device (Gboard: 80 MB after quantization). The prediction network is an internal LM, so no external LM is needed, unlike CTC. Cache-aware encoders process each frame once, which saves GPU compute and memory under many concurrent streams and avoids latency drift (NVIDIA claims up to 3x efficiency over buffered). Endpointing fits naturally, and so does the immutable output that downstream consumers want.
+2. **Why a voice agent cares about immutable text:** the agent *acts* on the text. It decides when the turn ends, may start the LLM early, and shows the text to the user. If shown text can change, the UI flickers, and anything already started (an early LLM call, an endpoint decision) may rest on words that later vanish and must be undone. Immutable text lets downstream steps start safely. Our `committed`/`tentative` split gives the same guarantee for the committed part: consumers act only on `committed`, and `tentative` is only for display.
+3. **Prediction for S2.7 / S5.1** (to check against the measured numbers):
+   - **Lowest `final_ms`**: `native` (Nemotron), which only flushes the last chunk. Then `chunked` (only the remainder, but still a full 30 s Whisper encoder pass), then `trimmed` (the tail). `redecode` is last because it runs a full decode, about `asr_ms`: roughly 0.4 s on turbo and 1.5 s on large-v3 for the 9.9 s fixture.
+   - **Steadiest partials**: `native`, which is committed-only and never changes. `chunked` is also append-only but often wrong. Among the Whisper strategies with tentative text, `redecode` and `trimmed` behave about the same.
+   - **Best WER**: `redecode` on large-v3, since its final equals v0. `native` should come close. `trimmed` is close to `redecode` on a 10 s clip because it rarely trims there; the difference shows on clips near 30 s. `chunked` is clearly worst, worse still at 500 ms than at 2000 ms.
 
 ---
 
@@ -274,6 +324,35 @@ The papers above, as running code. Every repo, file and symbol below was checked
    > Your answer:
 
 ### Finalized notes
+
+1. **NeMo's two buffers:**
+   - `CacheAwareStreamingAudioBuffer` hands out each chunk of new audio once. The encoder processes only that chunk, with cached keys, values and convolution states from earlier chunks, and the decoder continues the previous hypotheses. Each frame is computed once. That is our **`native`**.
+   - `FrameBatchASR` (and `BatchedFrameASRRNNT`) is **buffered** streaming. Each step runs an offline model over a whole buffer (the new chunk plus overlapping audio on both sides), recomputes all of it, and merges the outputs by keeping the tokens from the middle. That is closest to **`trimmed`** (a sliding window that gets re-decoded). `redecode` is the same idea with a window that never slides.
+2. **Mapping `whisper_online.py` onto PLAN_v1:**
+   - S2.3 (LocalAgreement) is `HypothesisBuffer.insert` plus `flush`.
+   - S2.4 (`redecode`) is `OnlineASRProcessor.process_iter`: transcribe the whole buffer, then insert and flush.
+   - S2.6 (`trimmed`) is `chunk_completed_sentence` / `chunk_completed_segment` / `chunk_at`, plus `prompt()` for the committed-text prompt.
+   - `finish` matches our `finish`.
+
+   What our plan leaves out:
+   - It works at **word level with timestamps** and trims by time.
+   - It removes repeated 1-5 word n-grams where a new hypothesis overlaps the committed text.
+   - It caps the prompt at about 200 characters.
+   - It forces a trim once the buffer grows past a limit (about 15 s), even mid-sentence.
+   - It has a sentence tokenizer.
+   - It has a VAD wrapper (`VACOnlineASRProcessor`, Silero).
+   - It handles long-form audio.
+
+   We do not need these at 30 s with push-to-talk.
+3. **What each keeps per stream:**
+   - **sherpa-onnx** `OnlineStream`: pending audio and feature frames, the encoder's per-layer states, the decoder result (tokens, timestamps, decoder output), the number of frames processed, and endpointing state (trailing silence, segment index).
+   - **NeMo** streaming state: the encoder caches (`cache_last_channel`, `cache_last_time` and their lengths), the previous hypotheses and the prediction network state, the preprocessor and audio buffer, and the partial and final text.
+   - **Our `ASRStream`**, by strategy:
+     - `chunked`: the leftover samples and the joined text.
+     - `redecode`: all the turn's audio, the last decode, and the committed words.
+     - `trimmed`: the audio since the trim point, the trim offset, the committed text, and the last decode.
+     - `native`: the NeMo caches and hypotheses, plus samples short of a full chunk.
+4. **LiveKit's `StreamAdapter` versus our `chunked`:** the VAD cuts at silences, so each piece is a whole phrase. No word is split, and the model gets a phrase's worth of context. That is why it is more accurate than `chunked`'s blind fixed-length cuts. The price is that it gives no partials inside a phrase. Text appears only after each pause (as a final), so it is less "live" than `chunked`'s steady 500 ms updates.
 
 ---
 
