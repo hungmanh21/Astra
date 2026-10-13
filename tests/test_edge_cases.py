@@ -11,8 +11,10 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.asr.base import PartialResult
 from backend.main import create_app
-from tests.helpers import MODELS, FakeLLM, make_settings, pcm
+from tests.fakes import FakeStreamingASR
+from tests.helpers import MODELS, FakeLLM, chunks, make_settings, pcm
 from tests.test_asr_registry import FakeASR
 from tests.test_main import BlockingASR, send_turn
 
@@ -25,6 +27,7 @@ def reset_fakes():
     FakeASR.error = None
     BlockingASR.started.clear()
     BlockingASR.release.clear()
+    FakeStreamingASR.reset()
 
 
 def read_until(ws, kind: str) -> list[dict]:
@@ -127,4 +130,136 @@ def test_connection_dropped_mid_turn_is_logged_and_the_server_carries_on(caplog)
     finally:
         valve.cancel()
     assert len(llm.calls) == 1  # only the second connection's turn
+    assert [line["status"] for line in turn_lines(caplog)] == ["dropped", "ok"]
+
+
+# --- streaming (PLAN_v1 S1.8): a fake model that streams natively, behind the real service ---
+
+STREAMING = "tests.fakes.FakeStreamingASR"
+P1 = PartialResult("hello", "")
+P2 = PartialResult("hello wor", "ld")
+
+
+def receive_within(ws, within_s: float = 5.0) -> dict:
+    """receive_json() that fails the test instead of hanging when the server stays silent.
+
+    If nothing arrives in time the server gets an invalid message, and its `error` reply
+    wakes the receive up, so the assertions that follow report what went wrong.
+    """
+    nudge = threading.Timer(within_s, ws.send_json, args=[{"type": "nudge"}])
+    nudge.start()
+    try:
+        return ws.receive_json()
+    finally:
+        nudge.cancel()
+
+
+def send_frames(ws, data: bytes) -> None:
+    for frame in chunks(data):
+        ws.send_bytes(frame)
+
+
+def start_turn(ws, **extra) -> dict:
+    ws.send_json({"type": "start_turn", "asr_model": MODELS[0], "review": False, **extra})
+    return receive_within(ws)
+
+
+def test_partials_arrive_while_the_frames_are_still_being_sent():
+    FakeStreamingASR.partials = [P1, P2]
+    client = TestClient(create_app(make_settings(adapter=STREAMING), llm=FakeLLM()))
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        turn_id = start_turn(ws)["turn_id"]
+
+        send_frames(ws, pcm(0.6))
+        first = receive_within(ws)  # end_turn has not been sent yet
+        assert first == {
+            "type": "partial",
+            "turn_id": turn_id,
+            "committed": "hello",
+            "tentative": "",
+        }
+
+        send_frames(ws, pcm(0.6))
+        second = receive_within(ws)
+        assert (second["type"], second["committed"], second["tentative"]) == (
+            "partial",
+            "hello wor",
+            "ld",
+        )
+
+        ws.send_json({"type": "end_turn"})
+        rest = read_until(ws, "llm_done")
+    types = [m["type"] for m in rest]
+    assert "partial" not in types  # nothing after end_turn
+    assert types[0] == "transcript"
+    assert rest[0]["text"] == "final text"
+    assert rest[0]["stream_strategy"] == "native"
+    assert rest[-1]["timings"]["partial_count"] == 2
+    # the model heard all the audio exactly once
+    assert len(FakeStreamingASR.streams[0].samples) == 19200
+
+
+def test_a_failing_partial_still_ends_in_transcript_and_reply(caplog):
+    FakeStreamingASR.feed_error = RuntimeError("decode blew up")
+    caplog.set_level(logging.INFO)
+    client = TestClient(create_app(make_settings(adapter=STREAMING), llm=FakeLLM()))
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        send_turn(ws, pcm(1.5))
+        messages = read_until(ws, "llm_done")
+    types = [m["type"] for m in messages]
+    assert "error" not in types and "partial" not in types  # the user sees nothing wrong
+    assert types[:2] == ["transcript", "llm_delta"]
+    assert messages[0]["text"] == "final text"
+    assert messages[-1]["text"] == "Hi there"
+    assert [line["status"] for line in turn_lines(caplog)] == ["ok"]
+
+
+def test_unsupported_strategy_is_refused_and_the_next_turn_starts():
+    client = TestClient(create_app(make_settings(adapter=STREAMING), llm=FakeLLM()))
+    with client.websocket_connect("/ws") as ws:
+        info = ws.receive_json()
+        assert info["stream_strategies"][MODELS[0]] == {
+            "supported": ["chunked", "redecode", "native"],  # no segments, so no `trimmed`
+            "default": "native",
+        }
+
+        refusal = start_turn(ws, stream_strategy="trimmed")
+        assert refusal["type"] == "error" and refusal["turn_id"] is None
+        assert "trimmed" in refusal["message"]
+        assert FakeStreamingASR.streams == []  # nothing was opened for the refused turn
+
+        ws.send_bytes(b"\x00\x00" * 800)  # no turn exists, so this is ignored
+        assert start_turn(ws, stream_strategy="chunked")["type"] == "turn_started"
+        send_frames(ws, pcm(0.5))
+        ws.send_json({"type": "end_turn"})
+        messages = read_until(ws, "llm_done")
+    assert messages[0]["stream_strategy"] == "chunked"
+    assert FakeStreamingASR.streams == []  # `chunked` does not use the adapter's own stream
+
+
+def test_disconnect_mid_stream_leaves_the_server_usable(caplog):
+    FakeStreamingASR.feed_gate = threading.Event()  # holds the decode on the ASR thread
+    caplog.set_level(logging.INFO)
+    app = create_app(make_settings(adapter=STREAMING), llm=FakeLLM())
+    valve = threading.Timer(5, FakeStreamingASR.feed_gate.set)
+    valve.start()
+    try:
+        with TestClient(app) as client:
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()
+                start_turn(ws)
+                send_frames(ws, pcm(0.6))  # a decode starts and is held
+            # the browser left in the middle of the turn, with a decode in flight
+            FakeStreamingASR.feed_gate.set()  # the decode ends
+            FakeStreamingASR.feed_gate = None
+
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()
+                send_turn(ws, pcm(0.5))
+                done = read_until(ws, "llm_done")[-1]
+                assert done["text"] == "Hi there"
+    finally:
+        valve.cancel()
     assert [line["status"] for line in turn_lines(caplog)] == ["dropped", "ok"]

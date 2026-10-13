@@ -1044,7 +1044,11 @@ def test_a_good_turn_logs_one_ok_record_with_all_fields(caplog):
     assert set(record["timings"]) == TIMING_KEYS
     assert record["timings"]["audio_s"] == 0.5
     assert record["timings"]["asr_ms"] == 12.5
-    # The streaming values are None for a batch turn (they get real values from S1.6 on).
+    # A turn without partials: zero partials, no lag, but the strategy and final_ms are real.
+    assert record["timings"]["partial_count"] == 0
+    assert record["timings"]["partial_lag_ms"] is None
+    assert record["timings"]["stream_strategy"] == "redecode"
+    assert record["timings"]["final_ms"] is not None
     numbers = {k: v for k, v in record["timings"].items() if v is not None}
     assert all(isinstance(v, int | float) for k, v in numbers.items() if k != "stream_strategy")
 

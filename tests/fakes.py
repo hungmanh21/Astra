@@ -35,12 +35,22 @@ class FakeStream:
 
     def feed(self, audio: np.ndarray) -> PartialResult | None:
         # A gate lets a test hold a feed "in flight" while more frames arrive (S1.4).
-        if self._feed_gate is not None and not self._feed_gate.wait(timeout=5):
-            raise TimeoutError("feed gate was never opened")
+        if self._feed_gate is not None:
+            self._wait_for_gate(self._feed_gate)
         self.fed.append(np.array(audio, dtype=np.float32, copy=True))
         if self._feed_error is not None:
             raise self._feed_error
         return self._partials.pop(0) if self._partials else None
+
+    @staticmethod
+    def _wait_for_gate(gate: threading.Event, within_s: float = 5.0) -> None:
+        # Event.wait(timeout) has returned early on the WSL2 dev machine under load; checking
+        # is_set() against our own deadline makes a held feed stay held.
+        deadline = time.monotonic() + within_s
+        while not gate.is_set():
+            if time.monotonic() > deadline:
+                raise TimeoutError("feed gate was never opened")
+            gate.wait(0.05)
 
     def finish(self) -> TranscriptResult:
         self.finished = True

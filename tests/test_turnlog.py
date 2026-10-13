@@ -53,6 +53,23 @@ def test_record_is_one_json_line_with_exactly_the_documented_keys(caplog):
     }
 
 
+def test_the_streaming_timings_are_written_as_they_are(caplog):
+    streamed = Timings(
+        audio_s=2.0,
+        asr_ms=300.0,
+        stream_strategy="redecode",
+        partial_count=4,
+        partial_lag_ms=420.5,
+        final_ms=310.0,
+    )
+    (record,) = logged(caplog, timings=streamed)
+    timings = json.loads(record.getMessage())["timings"]
+    assert timings["stream_strategy"] == "redecode"
+    assert timings["partial_count"] == 4
+    assert timings["partial_lag_ms"] == 420.5
+    assert timings["final_ms"] == 310.0
+
+
 def test_missing_timings_and_an_error_are_written_as_null_and_a_string(caplog):
     (record,) = logged(caplog, status="asr_error", timings=None, error="transcription failed")
     data = json.loads(record.getMessage())

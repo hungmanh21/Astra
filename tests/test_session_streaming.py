@@ -16,7 +16,7 @@ from backend.asr.service import ModelStrategies
 from backend.audio import pcm16_to_float32
 from backend.session import TurnStage
 from tests.helpers import MODELS, FakeClock, FakeLLM, FakeTranscriber, chunks, pcm
-from tests.test_session import END, run, settle
+from tests.test_session import END, TURN_LOG, run, settle
 
 OTHER = MODELS[1]
 P1 = PartialResult("hello", "")
@@ -528,3 +528,52 @@ def test_review_mode_shows_partials_then_waits_for_the_edited_final():
 
     run(scenario, transcriber=fake, llm=llm, clock=clock)
     assert llm.calls[0][-1] == {"role": "user", "content": "edited"}
+
+
+# --- the turn log (S1.7) ---
+
+
+def logged_turns(caplog, scenario, **kwargs) -> list[dict]:
+    with caplog.at_level(logging.INFO, logger=TURN_LOG):
+        run(scenario, **kwargs)
+    return [json.loads(r.getMessage()) for r in caplog.records if r.name == TURN_LOG]
+
+
+def test_the_log_line_has_the_streaming_values_and_matches_the_browser(caplog):
+    clock = FakeClock()
+    fake = FakeTranscriber(
+        text="my secret sentence",
+        partials=[PartialResult("private words", ""), PartialResult("private words more", "")],
+        clock=clock,
+        feed_takes_s=[0.1, 0.3],
+        takes_s=0.2,
+    )
+
+    async def scenario(session, transport):
+        await whole_turn(session, pcm(1.0))
+        await settle(session)
+        scenario.sent = transport.last("llm_done")["timings"]
+
+    (record,) = logged_turns(caplog, scenario, transcriber=fake, clock=clock)
+    timings = record["timings"]
+    assert timings["stream_strategy"] == "redecode"
+    assert timings["partial_count"] == 2
+    assert timings["partial_lag_ms"] == pytest.approx(200)
+    assert timings["final_ms"] == pytest.approx(200)
+    assert timings == scenario.sent  # the log and llm_done carry the same numbers
+
+    # still no text: not the transcript, not a partial, not the reply
+    lines = " ".join(r.getMessage() for r in caplog.records if r.name == TURN_LOG)
+    assert "secret" not in lines and "private" not in lines and "Hi there" not in lines
+
+
+def test_a_failed_turn_after_partials_logs_no_timings(caplog):
+    fake = FakeTranscriber(partials=[P1], error=ASRError("secret"))
+
+    async def scenario(session, transport):
+        await whole_turn(session, pcm(0.6))
+        await settle(session)
+
+    (record,) = logged_turns(caplog, scenario, transcriber=fake)
+    assert record["status"] == "asr_error"
+    assert record["timings"] is None
