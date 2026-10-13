@@ -38,7 +38,7 @@ def create_app(
     # Models stay lazy: nothing is loaded here, the first turn on a model loads it.
     if transcriber is None:
         registry = ASRRegistry(settings.asr_models)
-        transcriber = TranscriptionService(registry)
+        transcriber = TranscriptionService(registry, streaming=settings.asr_streaming)
 
     if llm is None:
         llm = LLMClient(settings.llm)

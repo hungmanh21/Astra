@@ -102,3 +102,8 @@
 - Reason: the `session` message lists every model's strategies at connect time, and loading weights for that (112 s for large-v3) is not acceptable. `ASRRegistry.peek(name)` builds the adapter without `load()` and `get()` reuses that instance, so the service can ask `isinstance(model, StreamingASRModel)` for free.
 - Rejected alternative: a `capabilities` field in config.yaml (a second source of truth that can disagree with the adapter); `issubclass` on the adapter class (not allowed for Protocols with data members like `name`).
 - Constraint: adapter constructors must stay cheap (no weights, no GPU). `load()` does the heavy work. `peek` uses its own lock so it never waits behind a model load.
+
+## 2026-10-13: The stream is opened at start_turn, so a cold model loads before the ack
+- Reason: partials need a stream from the first frame, and the stream needs the loaded model. Opening it in `start_turn` and acking after keeps the session simple: no buffering of frames while a model loads, and an unsupported strategy or a load failure becomes an `error` with the turn never started (FR-22).
+- Rejected alternative: ack at once and open the stream in the background while frames queue up (the first turn on a cold model would feel faster, but the session would need a "stream not ready" state).
+- Constraint: the first turn on a cold model now waits at `start_turn`, not after `end_turn` as in v0 (large-v3 loads in ~112 s). Preloading the default model at startup or a "loading" hint in the UI (S3) fixes the feel; until then, warm the model first.
