@@ -97,3 +97,8 @@
 - Reason: v1 doubles as an experiment bench. The same model can stream as `chunked` (each chunk decoded once, independently), `redecode` (whole turn re-decoded, LocalAgreement-2), `trimmed` (re-decode since the last settled sentence, with the settled text as prompt) or `native` (model's own streaming, Nemotron). `compare_asr.py --stream --strategy all` and a UI dropdown compare them on latency and WER.
 - Rejected alternative: one strategy per config entry (e.g. `whisper-turbo-chunked`), because the registry would load the same weights twice.
 - Constraint: strategies come from adapter capabilities (`open_stream` → `native`, `transcribe_segments` → `trimmed`), never from model names. `chunked` is expected to lose accuracy (cut words, no context, Whisper pads every input to 30 s) and is measured, not gated.
+
+## 2026-10-12: Strategy support is read from a constructed, not loaded, adapter
+- Reason: the `session` message lists every model's strategies at connect time, and loading weights for that (112 s for large-v3) is not acceptable. `ASRRegistry.peek(name)` builds the adapter without `load()` and `get()` reuses that instance, so the service can ask `isinstance(model, StreamingASRModel)` for free.
+- Rejected alternative: a `capabilities` field in config.yaml (a second source of truth that can disagree with the adapter); `issubclass` on the adapter class (not allowed for Protocols with data members like `name`).
+- Constraint: adapter constructors must stay cheap (no weights, no GPU). `load()` does the heavy work. `peek` uses its own lock so it never waits behind a model load.

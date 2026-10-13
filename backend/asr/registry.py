@@ -27,15 +27,38 @@ class ASRRegistry:
 
     def __init__(self, configs: Mapping[str, ASRModelConfig]) -> None:
         self._configs = dict(configs)
-        self._models: dict[str, ASRModel] = {}
+        self._models: dict[str, ASRModel] = {}  # loaded
+        self._built: dict[str, ASRModel] = {}  # constructed, maybe not loaded yet
         # Created up front so two threads never race to create the same lock.
         self._locks = {name: threading.Lock() for name in self._configs}
+        # Separate from the load locks: peek() must not wait behind a minutes-long load.
+        self._build_lock = threading.Lock()
 
     def available(self) -> list[str]:
         return list(self._configs)
 
     def is_loaded(self, name: str) -> bool:
         return name in self._models
+
+    def peek(self, name: str) -> ASRModel:
+        """The adapter, constructed but not loaded (PLAN_v1 S1.5).
+
+        Lets the service ask what a model can do (its strategies) without paying for its
+        weights. Adapter constructors must therefore stay cheap: load() does the heavy work.
+        """
+        if name not in self._configs:
+            raise UnknownASRModel(f"unknown ASR model: {name!r}")
+        with self._build_lock:
+            model = self._built.get(name)
+            if model is None:
+                try:
+                    model = self._build(name)
+                except ASRError:
+                    raise
+                except Exception as exc:
+                    raise ASRError(f"failed to create ASR model {name!r}: {exc}") from exc
+                self._built[name] = model
+            return model
 
     def get(self, name: str) -> tuple[ASRModel, float]:
         """Return a ready model and the load time of this call (0.0 if already loaded)."""
@@ -49,7 +72,7 @@ class ASRRegistry:
             if model is not None:
                 return model, 0.0
             try:
-                model = self._build(name)
+                model = self.peek(name)
                 start = time.perf_counter()
                 model.load()
                 load_ms = (time.perf_counter() - start) * 1000.0

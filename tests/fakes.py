@@ -7,6 +7,7 @@ call `reset()` in a fixture so tests do not leak scripts into each other.
 """
 
 import threading
+import time
 
 import numpy as np
 
@@ -55,6 +56,33 @@ class FakeStream:
     def samples(self) -> np.ndarray:
         """Everything fed so far, joined."""
         return np.concatenate(self.fed) if self.fed else np.zeros(0, dtype=np.float32)
+
+
+class FakePlainASR:
+    """A batch-only model: `ASRModel` and nothing else, so only the generic strategies."""
+
+    load_calls = 0
+    load_delay_s = 0.0
+    transcribed: list[np.ndarray] = []  # the audio of every transcribe call
+
+    def __init__(self, name: str, model_id: str = "fake/plain", **options) -> None:
+        self.name = name
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.load_calls = 0
+        cls.load_delay_s = 0.0
+        cls.transcribed = []
+
+    def load(self) -> None:
+        time.sleep(FakePlainASR.load_delay_s)
+        FakePlainASR.load_calls += 1
+
+    def transcribe(self, audio, sample_rate=16000, language=None) -> TranscriptResult:
+        FakePlainASR.transcribed.append(np.array(audio, dtype=np.float32, copy=True))
+        return TranscriptResult(
+            text="plain text", language="en", duration_s=len(audio) / sample_rate, latency_ms=3.0
+        )
 
 
 class FakeStreamingASR:
@@ -130,3 +158,10 @@ class FakeSegmentedASR:
     ) -> tuple[list[Segment], float]:
         FakeSegmentedASR.prompts.append(prompt)
         return list(self.segments), 0.0
+
+
+class FakeFullASR(FakeStreamingASR, FakeSegmentedASR):
+    """Both optional capabilities at once: all four strategies."""
+
+    def __init__(self, name: str, model_id: str = "fake/full", **options) -> None:
+        FakeStreamingASR.__init__(self, name, model_id, **options)

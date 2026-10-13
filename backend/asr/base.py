@@ -20,6 +20,10 @@ class UnknownASRModel(ASRError):
     """The requested registry key does not exist."""
 
 
+class UnsupportedStrategy(ASRError):
+    """The model exists but does not support the requested streaming strategy (FR-22)."""
+
+
 @dataclass(frozen=True)
 class TranscriptResult:
     text: str

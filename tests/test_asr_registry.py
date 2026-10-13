@@ -199,3 +199,31 @@ def test_service_preload_loads_the_model():
     finally:
         service.shutdown()
     assert reg.is_loaded("a")
+
+
+def test_peek_builds_without_loading_and_get_reuses_the_instance():
+    reg = make_registry("a")
+    peeked = reg.peek("a")
+    assert FakeASR.load_calls == 0
+    assert not reg.is_loaded("a")
+    model, _ = reg.get("a")
+    assert model is peeked
+    assert FakeASR.load_calls == 1
+    assert reg.peek("a") is peeked
+
+
+def test_peek_unknown_model_and_does_not_wait_for_a_load():
+    reg = make_registry("a")
+    with pytest.raises(UnknownASRModel):
+        reg.peek("nope")
+
+    reg.peek("a")
+    FakeASR.load_delay = 0.4
+    loading = threading.Thread(target=reg.get, args=("a",))
+    loading.start()
+    time.sleep(0.1)  # the load holds the model's lock now
+    start = time.perf_counter()
+    reg.peek("a")
+    waited = time.perf_counter() - start
+    loading.join()
+    assert waited < 0.2
