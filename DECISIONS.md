@@ -112,4 +112,4 @@
 - Reason: SPEC_v1 dropped a remainder under `partial_min_audio_ms`, but with the shipped values (`chunk_ms` 500, minimum 1000) every remainder is shorter than a chunk, so speech in the last <500 ms of a push-to-talk turn would always be lost. `partial_min_audio_ms` now only gates the first partial of `redecode` and `trimmed`.
 - Measured cost (fixture, turbo): the fixture ends in silence, so decoding the remainder makes Whisper invent text: `chunk_ms` 500 appended "Yeah." (WER 66.7 -> 70.8 %), 1000 appended "Thank you." (29.2 -> 37.5 %); 2000 was unchanged (16.7 %, its 1.9 s remainder was kept before too).
 - Rejected alternative: keep the minimum for `chunked` and lower its default. The final transcript should not depend on how the last chunk happens to fall.
-- Open: if trailing-silence text matters in live use, add a cheap energy floor on the remainder (the 500 ms remainder had RMS 0.0009 against 0.07 for the whole clip) rather than a length rule.
+- Decided to leave it as measured: trailing-silence text is a job for a client-side VAD later (only chunks with real sound would be sent), not for a rule in `chunked`.
