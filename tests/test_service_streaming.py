@@ -22,6 +22,7 @@ from backend.asr.strategies import (
     BatchStream,
     ChunkedStream,
     RedecodeStream,
+    TrimmedStream,
     default_strategy,
     supported_strategies,
 )
@@ -218,26 +219,6 @@ def test_each_native_turn_gets_its_own_stream(service):
     assert len(FakeStreamingASR.streams) == 2
 
 
-@pytest.mark.parametrize(
-    ("model", "strategy"),
-    [
-        ("segmented", "trimmed"),
-        ("full", "trimmed"),
-    ],
-)
-def test_open_stream_batch_path_behaves_like_v0(service, model, strategy):
-    async def scenario():
-        opened = await service.open_stream(model, strategy)
-        assert isinstance(opened.stream, BatchStream)
-        assert await service.run(opened.stream.feed, audio(16000)) is None
-        return await service.run(opened.stream.finish)
-
-    result = asyncio.run(scenario())
-    assert result.duration_s == 1.0
-    assert result.text  # the whole-turn transcription from the model
-    assert not FakeStreamingASR.streams  # the native stream was not touched
-
-
 @pytest.mark.parametrize("model", ["plain", "streaming"])  # a streaming model also has redecode
 def test_open_stream_redecode_uses_the_configured_minimum(model):
     svc = TranscriptionService(
@@ -394,3 +375,17 @@ def test_service_stream_drives_a_streaming_transcription(service):
     result = asyncio.run(scenario())
     assert seen == [PartialResult("hello", "")]
     assert result.text == "final text"
+
+
+@pytest.mark.parametrize("model", ["segmented", "full"])  # a full model also has trimmed
+def test_open_stream_trimmed_uses_the_configured_minimum(model):
+    svc = TranscriptionService(
+        make_registry(), streaming=StreamingSettings(partial_min_audio_ms=300)
+    )
+    try:
+        opened = asyncio.run(svc.open_stream(model, "trimmed"))
+    finally:
+        svc.shutdown()
+    assert isinstance(opened.stream, TrimmedStream)
+    assert opened.stream._min_samples == 4800
+    assert not FakeStreamingASR.streams  # the native stream was not touched

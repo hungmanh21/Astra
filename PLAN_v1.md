@@ -73,7 +73,7 @@ Goal: real partials from the Whisper models we already have, in three ways that 
   Done when: tests with a scripted fake show committed growth across feeds, no partial before the minimum audio, and a `finish` result equal to the plain `transcribe` result; `compare_asr.py --stream --strategy redecode` on the fixture is in the Notes.
 - [x] **S2.5 Whisper segments and prompt.** Make `WhisperASR` a `SegmentedASRModel`: `transcribe_segments` returns segments with start and end times (pipeline timestamps) and takes an optional text prompt (Whisper `prompt_ids`). This is a capability of the adapter, not a special case in the session.
   Done when: on the fixture, the segments' text joined equals the plain transcript (apart from spacing), the timestamps increase and lie inside the clip, and a prompt run still gives sensible text (checked with `compare_asr.py`; the adapter's unit test uses a stubbed pipeline).
-- [ ] **S2.6 `trimmed` (`TrimmedStream`).** Like `redecode`, but it decodes only the audio after the trim point, prompted with the committed text. It moves the trim point to the end of a committed segment that ends a sentence (SPEC_v1 6.4). `finish` decodes only the tail and returns committed + tail.
+- [x] **S2.6 `trimmed` (`TrimmedStream`).** Like `redecode`, but it decodes only the audio after the trim point, prompted with the committed text. It moves the trim point to the end of a committed segment that ends a sentence (SPEC_v1 6.4). `finish` decodes only the tail and returns committed + tail.
   Done when: tests with a scripted fake segmented model show the trim point moving only on a committed sentence end, the decoded audio getting shorter after a trim, the prompt carrying the committed text, and committed text never shrinking across a trim; `compare_asr.py --stream --strategy trimmed` on the fixture is in the Notes.
 - [ ] **S2.7 Compare, tune and decide.** Run `compare_asr.py --stream --strategy all` on the fixture for both Whisper models (and on a longer clip near 30 s if one is at hand, where `trimmed` should pull ahead). Set the `partial_interval_ms`, `partial_min_audio_ms`, `chunk_ms` and default-strategy values, and decide what to recommend for large-v3. Close those questions in SPEC_v1 section 10.
   Done when: the comparison table is in the Notes, the defaults are in `config.yaml`, and there is a DECISIONS entry with the numbers behind them.
@@ -157,5 +157,25 @@ Goal: native streaming. Mind the slow PyPI downloads (PROGRESS Known Issues).
 
   The final text equals batch on both. Settled words trail the newest by about one decode ("He has grasped." became "He has grave doubts" before "He has" was committed), and the tentative tail shows mistakes the next decode removes ("rocky Ithanae." then "Ithaca."). The lag grows with the turn because every decode covers all the audio; large-v3 takes 1.5 s per decode, so it cannot keep the 500 ms pace (10 partials instead of 17). **`final_ms` is about twice a full decode**, not one as SPEC_v1 6.3 expects: at `end_turn` the remaining audio is fed (a full decode whose partial is dropped) and `finish` then decodes again. Not yet separated from a decode already in flight.
 - **Whisper segments (S2.5),** `compare_asr.py --segments` on the fixture (2026-10-14): both models return one segment, 0.00-9.90 s (a single sentence; a 25 s clip with three repeats split into segments in a hand probe), and its text joined equals the plain transcript. Times increase and lie inside the clip. A prompted run on the audio after 3 s (prompt "He has grave doubts whether Sir") gives sensible text and no echo of the prompt. **Watch out for S2.6:** on `whisper-large-v3` the timestamped text came back **lower case without punctuation** ("he has grave doubts ... rocky ithaca"), while plain `transcribe` and turbo give "He has grave doubts ... Ithaca." The "segment ends in sentence punctuation" rule cannot fire on that text. The prompted large-v3 run was punctuated again ("Newton's work is really Greek after all, and ..."), so a prompt may restore the style; S2.6/S2.7 should test it.
-- **Strategy results (S2.6-S2.7):** _to fill in._
+- **`trimmed` (S2.6),** `compare_asr.py --stream --strategy trimmed`, same fixture (2026-10-14):
+
+  | model | partials | median lag | `final_ms` | WER |
+  |---|---|---|---|---|
+  | `whisper-large-v3-turbo` | 17 | 344 ms | 621 ms | 4.2 % |
+  | `whisper-large-v3` | 9 | 879 ms | 4163 ms | 0.0 % |
+
+  The fixture is one sentence, so **no cut ever happens on it** and `trimmed` behaves like `redecode` (turbo `final_ms` is lower, 621 against 839, only because the timestamped decode is a little cheaper there). On `whisper-large-v3` the final text is lower case without punctuation (the timestamp-mode finding above) and `final_ms` is higher than `redecode`'s 3199 ms.
+
+  To exercise the cut I made a 29.7 s clip from the fixture three times in a row (scratch file, not committed; the 30 s cap rules out a longer one). Turbo, all strategies, real-time pace:
+
+  | strategy | partials | median lag | `final_ms` | WER |
+  |---|---|---|---|---|
+  | batch | - | - | 955 ms | 4.2 % |
+  | `chunked` (500 ms) | 59 | 193 ms | 200 ms | 69.4 % |
+  | `redecode` | 46 | 478 ms | 2231 ms | 4.2 % |
+  | `trimmed` | 55 | 348 ms | 519 ms | 8.3 % |
+
+  `trimmed` pays off where it should: `final_ms` stays under 0.6 s instead of growing with the turn, and the lag is lower than `redecode`'s. The price is accuracy: sentence 2 and 3 get extra "Ithaca." repeats at their ends and a few punctuation changes, so the WER doubles. A 200 ms margin on the cut did not change it, so it is not the timestamps; the likely cause is that this clip repeats one sentence, which makes the prompt (the sentence just settled) the next thing Whisper "expects". S2.7 must repeat this on a clip with different sentences before judging `trimmed` on accuracy.
+- **Found by the long run (S2.6):** the first version built the settled text from the current decode's spelling, so a cut could turn "doubts," into "doubts" after it was shown (the FR-16 check in `compare_asr.py` flagged it). The settled text now uses the committed words as they were shown; `test_the_settled_text_keeps_the_spelling_the_user_already_saw` covers it.
+- **Strategy results (S2.7):** _to fill in._
 - **Testing:** real model weights stay out of pytest, as in v0. A test that needs NeMo or the weights is skipped when they are missing.

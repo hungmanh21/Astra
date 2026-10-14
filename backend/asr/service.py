@@ -13,12 +13,18 @@ from typing import Any
 
 import numpy as np
 
-from backend.asr.base import ASRError, ASRStream, StreamingASRModel, UnsupportedStrategy
+from backend.asr.base import (
+    ASRError,
+    ASRStream,
+    SegmentedASRModel,
+    StreamingASRModel,
+    UnsupportedStrategy,
+)
 from backend.asr.registry import ASRRegistry
 from backend.asr.strategies import (
-    BatchStream,
     ChunkedStream,
     RedecodeStream,
+    TrimmedStream,
     default_strategy,
     supported_strategies,
 )
@@ -117,8 +123,8 @@ class TranscriptionService:
 
         Input:  strategy - one of strategies(model_name).supported.
         Output: OpenedStream. "native" gives the adapter's own open_stream(); "chunked" a
-                ChunkedStream; "redecode" a RedecodeStream; every other strategy a
-                BatchStream until S2 replaces them.
+                ChunkedStream; "redecode" a RedecodeStream; "trimmed" a
+                TrimmedStream.
         Raises: UnknownASRModel; UnsupportedStrategy (also for a name that is not a strategy
                 at all) BEFORE loading anything, so a bad request never costs a model load;
                 ASRError for anything else, wrapped like transcribe().
@@ -138,7 +144,10 @@ class TranscriptionService:
         if strategy == "redecode":
             stream = RedecodeStream(model, min_audio_ms=self._streaming.partial_min_audio_ms)
             return OpenedStream(stream, load_ms)
-        return OpenedStream(BatchStream(model), load_ms)
+        # strategies() only lists "trimmed" for a SegmentedASRModel.
+        assert strategy == "trimmed" and isinstance(model, SegmentedASRModel)
+        stream = TrimmedStream(model, min_audio_ms=self._streaming.partial_min_audio_ms)
+        return OpenedStream(stream, load_ms)
 
     async def preload(self, model_name: str) -> None:
         loop = asyncio.get_running_loop()

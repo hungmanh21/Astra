@@ -4,12 +4,15 @@ Strategies come from what an adapter can do, never from its name (SPEC_v1 6.4). 
 real `ChunkedStream`, `RedecodeStream` and `TrimmedStream` to this file.
 """
 
+import re
+
 import numpy as np
 
 from backend.asr.agreement import local_agreement
 from backend.asr.base import (
     ASRModel,
     PartialResult,
+    Segment,
     SegmentedASRModel,
     StreamingASRModel,
     TranscriptResult,
@@ -239,4 +242,153 @@ class RedecodeStream:
         samples = np.concatenate(self._audio)
         return self._model.transcribe(
             samples, sample_rate=self._sample_rate, language=self._language
+        )
+
+
+def trim_point(segments: list[Segment], committed_words: int) -> int:
+    """How many leading segments are settled enough to cut their audio away.
+
+    Input:  segments - the segments of the latest decode of the window, in time order.
+            committed_words - how many leading words of that decode are committed
+            (LocalAgreement). A segment's words are what `segment.text.split()` gives.
+    Output: the largest k such that BOTH hold, or 0 when no k does:
+              - the words of segments[:k] together are at most `committed_words`: a segment
+                that is only partly committed is never cut, and
+              - segments[k-1] ends a sentence: its text, after trailing whitespace and closing
+                quotes or brackets (`"`, `'`, `)`, `]`, and the curly `\u201d`, `\u2019`)
+                are removed, ends with ".", "?" or "!".
+            Example: segments "Hello there." / "How are" / "you today?" with 4 committed
+            words -> 1 (the second segment is not a sentence end, so the cut stops before it);
+            with 6 committed words -> 3.
+    """
+    words = 0
+    best = 0
+    for k, segment in enumerate(segments, start=1):
+        words += len(segment.text.split())
+        if words > committed_words:
+            break
+        if re.search(r"[.?!][\"')\]\u201d\u2019]*$", segment.text.rstrip()):
+            best = k
+    return best
+
+
+def _join(segments: list[Segment]) -> str:
+    """The segments' texts, stripped, joined by single spaces."""
+    return " ".join(text for seg in segments if (text := seg.text.strip()))
+
+
+class TrimmedStream:
+    """The `trimmed` strategy: `redecode`, but the decoded audio never grows past one sentence.
+
+    Once a whole sentence is committed, its audio is cut away and its text becomes the
+    prompt of the next decodes. So a decode covers only the audio after the last cut (the
+    "window"), however long the turn gets. Needs a SegmentedASRModel (SPEC_v1 6.4).
+
+    The text of a turn has two parts: `_settled`, the text of the audio already cut away
+    (never decoded again), and the window's own text, which LocalAgreement splits into
+    committed words and a tentative tail like in `RedecodeStream`.
+    """
+
+    def __init__(
+        self,
+        model: SegmentedASRModel,
+        *,
+        min_audio_ms: int,
+        sample_rate: int = 16000,
+    ) -> None:
+        self._model = model
+        self._min_samples = min_audio_ms * sample_rate // 1000  # no partial before this much audio
+        self._sample_rate = sample_rate
+        self._window: list[np.ndarray] = []  # audio after the last cut, oldest first
+        self._total_samples = 0  # everything ever fed, cut or not
+        self._settled = ""  # text of the audio that was cut away
+        self._committed = ""  # committed text of the window (not counting `_settled`)
+        self._previous = ""  # text of the window at the last successful decode
+        self._shown = ("", "")  # (committed, tentative) of the last partial returned
+
+    def feed(self, audio: np.ndarray) -> PartialResult | None:
+        """Add `audio`, decode the window (once enough audio exists), maybe cut a sentence.
+
+        Input:  audio - the NEW samples (float32). Copy what you keep, and keep it BEFORE
+                decoding, so a failed decode loses nothing.
+        Output: None while the whole turn (cut audio included) is shorter than `min_audio_ms`.
+                After that, one `model.transcribe_segments(window, sample_rate,
+                prompt=self._settled or None)` call, then:
+                  1. text = the segments' texts, stripped, joined by single spaces.
+                  2. committed, tentative = `local_agreement(self._committed, self._previous,
+                     text)`.
+                  3. k = `trim_point(segments, number of words in committed)`. If k > 0:
+                     drop the window audio up to `segments[k-1].end_s` (seconds counted from
+                     the START OF THE WINDOW, not of the turn; clamp to the window length),
+                     append the cut segments' text to `_settled`, and take their words off
+                     the front of both the committed text and the text kept as `_previous`
+                     (the window now starts after them, and the next decode will not contain
+                     them).
+                  4. update `_committed` and `_previous`.
+                The partial is PartialResult(settled + committed, tentative) with one space
+                between the two parts (no stray space when `_settled` or the committed text is
+                empty). Return None instead when that pair equals `_shown`, so a steady text is
+                not sent twice; the decode still counts as the previous one.
+        Raises: whatever the model raises; the state (`_settled`, `_committed`, `_previous`,
+                the cut point) stays as it was, and the audio just fed stays in the window.
+        """
+        self._window.append(np.array(audio, dtype=np.float32, copy=True))
+        self._total_samples += len(audio)
+        if self._total_samples < self._min_samples:
+            return None
+
+        window = np.concatenate(self._window)
+        segments, _ = self._model.transcribe_segments(
+            window, self._sample_rate, prompt=self._settled or None
+        )
+        text = _join(segments)
+        committed, tentative = local_agreement(self._committed, self._previous, text)
+        committed_words = committed.split()
+
+        # From here on nothing can raise: the decode worked, so the state may change.
+        cut = trim_point(segments, len(committed_words))
+        if cut:
+            dropped = len(_join(segments[:cut]).split())
+            # The committed spelling, not this decode's: what the user saw must not change.
+            self._settled = " ".join(filter(None, [self._settled, *committed_words[:dropped]]))
+            committed_words = committed_words[dropped:]
+            text = " ".join(text.split()[dropped:])
+            # Seconds count from the start of the window, so cuts add up by themselves.
+            end = min(int(segments[cut - 1].end_s * self._sample_rate), len(window))
+            self._window = [window[end:]] if end < len(window) else []
+
+        self._committed = " ".join(committed_words)
+        self._previous = text
+        shown = (" ".join(filter(None, [self._settled, self._committed])), tentative)
+        if shown == self._shown:
+            return None
+        self._shown = shown
+        return PartialResult(*shown)
+
+    def finish(self) -> TranscriptResult:
+        """Decode only the window and return the whole turn's text: settled + the tail.
+
+        Output: TranscriptResult(text=`_settled` and the window's decode (segments joined
+                like in `feed`, prompted with `_settled`), joined by one space, language="en",
+                duration_s=ALL the audio fed, cut or not, latency_ms=the decode's latency).
+                No model call, and the settled text alone, when the window holds no audio
+                (the cut was exactly at the end). Nothing fed gives an empty result
+                (text "", duration 0.0, latency 0.0) without a model call. A turn shorter
+                than `min_audio_ms` is decoded too: the minimum only gates partials.
+        Raises: whatever the model raises.
+        """
+        if self._total_samples == 0:
+            return TranscriptResult(text="", language="en", duration_s=0.0, latency_ms=0.0)
+
+        tail, latency_ms = "", 0.0
+        if self._window:  # a cut at the very end leaves no audio to decode
+            segments, latency_ms = self._model.transcribe_segments(
+                np.concatenate(self._window), self._sample_rate, prompt=self._settled or None
+            )
+            tail = _join(segments)
+        return TranscriptResult(
+            text=" ".join(filter(None, [self._settled, tail])),
+            language="en",
+            duration_s=self._total_samples / self._sample_rate,
+            latency_ms=latency_ms,
         )

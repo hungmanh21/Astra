@@ -9,6 +9,7 @@ import numpy as np
 from backend.asr.base import (
     ASRError,
     PartialResult,
+    Segment,
     TranscriptResult,
     UnknownASRModel,
     UnsupportedStrategy,
@@ -92,6 +93,38 @@ class RecordingModel:
         self.kwargs.append({"sample_rate": sample_rate, "language": language})
         text = self.texts.pop(0) if self.texts else f"w{len(self.calls)}"
         return TranscriptResult(text, "en", len(audio) / sample_rate, 5.0)
+
+
+class RecordingSegmentedModel:
+    """A SegmentedASRModel that returns scripted segment lists, one per call, and records calls.
+
+    `scripts[i]` is what call i returns; past the end of the list it returns no segments.
+    `calls` has the audio of every successful call, `prompts` its prompt.
+    """
+
+    def __init__(self, scripts: list[list[Segment]], fail_on: set[int] | None = None) -> None:
+        self.scripts = [list(s) for s in scripts]
+        self.fail_on = fail_on or set()  # 1-based call numbers that raise ASRError
+        self.calls: list[np.ndarray] = []
+        self.prompts: list[str | None] = []
+        self.attempts = 0
+
+    def load(self) -> None:  # pragma: no cover - never called
+        pass
+
+    def transcribe(self, audio, sample_rate=16000, language=None) -> TranscriptResult:
+        raise AssertionError("trimmed must use transcribe_segments")
+
+    def transcribe_segments(
+        self, audio, sample_rate: int = 16000, prompt: str | None = None
+    ) -> tuple[list[Segment], float]:
+        self.attempts += 1
+        if self.attempts in self.fail_on:
+            raise ASRError("decode failed")
+        self.calls.append(np.array(audio, copy=True))
+        self.prompts.append(prompt)
+        index = len(self.calls) - 1
+        return (list(self.scripts[index]) if index < len(self.scripts) else []), 7.0
 
 
 class FakeTurnStream:
