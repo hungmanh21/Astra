@@ -107,3 +107,9 @@
 - Reason: partials need a stream from the first frame, and the stream needs the loaded model. Opening it in `start_turn` and acking after keeps the session simple: no buffering of frames while a model loads, and an unsupported strategy or a load failure becomes an `error` with the turn never started (FR-22).
 - Rejected alternative: ack at once and open the stream in the background while frames queue up (the first turn on a cold model would feel faster, but the session would need a "stream not ready" state).
 - Constraint: the first turn on a cold model now waits at `start_turn`, not after `end_turn` as in v0 (large-v3 loads in ~112 s). Preloading the default model at startup or a "loading" hint in the UI (S3) fixes the feel; until then, warm the model first.
+
+## 2026-10-14: `chunked` decodes the last remainder however short
+- Reason: SPEC_v1 dropped a remainder under `partial_min_audio_ms`, but with the shipped values (`chunk_ms` 500, minimum 1000) every remainder is shorter than a chunk, so speech in the last <500 ms of a push-to-talk turn would always be lost. `partial_min_audio_ms` now only gates the first partial of `redecode` and `trimmed`.
+- Measured cost (fixture, turbo): the fixture ends in silence, so decoding the remainder makes Whisper invent text: `chunk_ms` 500 appended "Yeah." (WER 66.7 -> 70.8 %), 1000 appended "Thank you." (29.2 -> 37.5 %); 2000 was unchanged (16.7 %, its 1.9 s remainder was kept before too).
+- Rejected alternative: keep the minimum for `chunked` and lower its default. The final transcript should not depend on how the last chunk happens to fall.
+- Open: if trailing-silence text matters in live use, add a cheap energy floor on the remainder (the 500 ms remainder had RMS 0.0009 against 0.07 for the whole clip) rather than a length rule.

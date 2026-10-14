@@ -235,7 +235,8 @@ def test_unsupported_strategy_is_refused_and_the_next_turn_starts():
         send_frames(ws, pcm(0.5))
         ws.send_json({"type": "end_turn"})
         messages = read_until(ws, "llm_done")
-    assert messages[0]["stream_strategy"] == "chunked"
+    transcript = next(m for m in messages if m["type"] == "transcript")
+    assert transcript["stream_strategy"] == "chunked"
     assert FakeStreamingASR.streams == []  # `chunked` does not use the adapter's own stream
 
 

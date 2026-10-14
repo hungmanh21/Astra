@@ -1,8 +1,8 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 3fa6480 (Record the v0 Whisper baseline on the fixture clip (S0.2))
-- Test status: 260 pytest tests passing (audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
+- Latest commit: e82c015 Test the streaming turn log and edge cases over a real WebSocket (S1.7, S1.8)
+- Test status: 356 pytest tests passing (audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
 - Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]`, `pyyaml`, `pydantic`, `python-dotenv` (plus the original audio libs); dev: `pytest`, `ruff`, `httpx`
@@ -33,10 +33,12 @@
 - [x] Worklet and recorder logic checked with stubbed Node tests (resampling at 48k/44.1k/16k, 30 s cap, stale-message handling)
 
 ## In Progress
-- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 15%: S0.1, S0.2, S1.1, S1.2, S1.3 done (baseline: large-v3 1499 ms, turbo 385 ms on the 9.9 s fixture, in PLAN_v1 Notes). Turn log already carries the four streaming timing fields (via `Timings.model_dump`), so S1.7 only lacks its test
+- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 40%: S0.1, S0.2, S1.1-S1.8 done (the streaming seam is complete and tested end to end with fakes; every stream is still a `BatchStream` placeholder) (baseline: large-v3 1499 ms, turbo 385 ms on the 9.9 s fixture, in PLAN_v1 Notes). Turn log already carries the four streaming timing fields (via `Timings.model_dump`), so S1.7 only lacks its test
 - [~] v0 follow-ups not in v1: real vLLM server test (PLAN_v0 T5.4). NeMo adapters and the M0 questions moved into PLAN_v1 S4
 
 ## Known Issues
+- A cold model now loads at `start_turn`, before the ack (v1 design, see DECISIONS 2026-10-13); preload or a UI hint is needed in S3
+- `tests/test_asr_base.py::test_fake_stream_can_fail_and_block` failed once in a full run (WSL2 `Event.wait(timeout)` returning early); passes on rerun
 - Review-mode frontend fixes (blank transcript, stale buttons after a failed turn) not yet re-checked in Chrome
 - Firefox unverified: it may refuse a mic stream in a 16 kHz `AudioContext`, and that error is thrown in `createMediaStreamSource`, outside the fallback in `recorder.js`
 - Review nits not done: `log_turn` silently ignores an unknown status; `parse_client_message` builds a `TypeAdapter` per message; a missing `config.yaml` key raises `KeyError` instead of `ConfigError`; `librosa`, `matplotlib`, `scipy` are app dependencies but only `theory/` uses them; `pyproject.toml` description is a placeholder
@@ -52,6 +54,5 @@
 - Whisper may emit text such as "Thank you." on silence or noise; not handled in v0, note what you see in M2
 
 ## Next Steps
-1. S1.4: implement `StreamingTranscription` in `backend/asr/streaming.py` (stub with `TODO(you)` and `tests/test_streaming.py` are in place, uncommitted; 16 tests fail until it is implemented). Coalescing, one decode in flight
-2. S1.5-S1.8: service and strategy lookup, session wiring, turn-log test, edge cases over a real WebSocket
-3. S2: Whisper strategies, then S3 UI partials, S4 NeMo and Nemotron, S5 measurements
+1. S2 in plan order: S2.1 `compare_asr.py --stream` first (so every strategy is measured the moment it exists), S2.2 `ChunkedStream`, S2.3 LocalAgreement-2 (`backend/asr/agreement.py`), S2.4 `RedecodeStream`, S2.5 `transcribe_segments` on `WhisperASR`, S2.6 `TrimmedStream`, S2.7 compare and tune. Each replaces `BatchStream` for its strategy in the service
+2. S3 UI partials (strategy dropdown, dimmed tentative text), then S4 NeMo and Nemotron, S5 measurements

@@ -15,7 +15,12 @@ import numpy as np
 
 from backend.asr.base import ASRError, ASRStream, StreamingASRModel, UnsupportedStrategy
 from backend.asr.registry import ASRRegistry
-from backend.asr.strategies import BatchStream, default_strategy, supported_strategies
+from backend.asr.strategies import (
+    BatchStream,
+    ChunkedStream,
+    default_strategy,
+    supported_strategies,
+)
 from backend.config import StreamingSettings
 
 log = logging.getLogger(__name__)
@@ -110,8 +115,8 @@ class TranscriptionService:
         """Start the stream for one turn. Loads the model on first use, off the event loop.
 
         Input:  strategy - one of strategies(model_name).supported.
-        Output: OpenedStream. "native" gives the adapter's own open_stream(); every other
-                strategy gives a BatchStream until S2 replaces them one by one.
+        Output: OpenedStream. "native" gives the adapter's own open_stream(); "chunked" a
+                ChunkedStream; every other strategy a BatchStream until S2 replaces them.
         Raises: UnknownASRModel; UnsupportedStrategy (also for a name that is not a strategy
                 at all) BEFORE loading anything, so a bad request never costs a model load;
                 ASRError for anything else, wrapped like transcribe().
@@ -126,6 +131,8 @@ class TranscriptionService:
             # strategies() only lists "native" for a StreamingASRModel.
             assert isinstance(model, StreamingASRModel)
             return OpenedStream(model.open_stream(16000, "en"), load_ms)
+        if strategy == "chunked":
+            return OpenedStream(ChunkedStream(model, chunk_ms=self._streaming.chunk_ms), load_ms)
         return OpenedStream(BatchStream(model), load_ms)
 
     async def preload(self, model_name: str) -> None:

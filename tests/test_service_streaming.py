@@ -18,7 +18,12 @@ from backend.asr.base import (
 )
 from backend.asr.registry import ASRModelConfig, ASRRegistry
 from backend.asr.service import TranscriptionService
-from backend.asr.strategies import BatchStream, default_strategy, supported_strategies
+from backend.asr.strategies import (
+    BatchStream,
+    ChunkedStream,
+    default_strategy,
+    supported_strategies,
+)
 from backend.asr.streaming import StreamingTranscription
 from backend.config import StreamingSettings
 from tests.fakes import FakeFullASR, FakePlainASR, FakeSegmentedASR, FakeStreamingASR
@@ -215,7 +220,6 @@ def test_each_native_turn_gets_its_own_stream(service):
 @pytest.mark.parametrize(
     ("model", "strategy"),
     [
-        ("plain", "chunked"),
         ("plain", "redecode"),
         ("segmented", "trimmed"),
         ("streaming", "redecode"),  # a streaming model still supports the generic ones
@@ -233,6 +237,16 @@ def test_open_stream_batch_path_behaves_like_v0(service, model, strategy):
     assert result.duration_s == 1.0
     assert result.text  # the whole-turn transcription from the model
     assert not FakeStreamingASR.streams  # the native stream was not touched
+
+
+def test_open_stream_chunked_uses_the_configured_chunk():
+    svc = TranscriptionService(make_registry(), streaming=StreamingSettings(chunk_ms=1000))
+    try:
+        opened = asyncio.run(svc.open_stream("plain", "chunked"))
+    finally:
+        svc.shutdown()
+    assert isinstance(opened.stream, ChunkedStream)
+    assert opened.stream._chunk_samples == 16000
 
 
 @pytest.mark.parametrize(

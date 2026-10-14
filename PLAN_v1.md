@@ -63,9 +63,9 @@ Goal: the server sends `partial` messages for a fake streaming model, end to end
 
 Goal: real partials from the Whisper models we already have, in three ways that can be compared (SPEC_v1 section 1). Each strategy task replaces `BatchStream` for that strategy only, so the others keep working throughout.
 
-- [ ] **S2.1 `compare_asr.py --stream`.** First, so every strategy is measured the moment it exists. Feed a WAV in 50 ms frames at real-time pace through `open_stream` and `StreamingTranscription` (the real coalescing). Print each partial with its time offset (committed | tentative), then `partial_count`, median `partial_lag_ms`, `final_ms`, the final text and its word error rate (WER) against the reference `.txt` when one sits next to the WAV. `--strategy` picks one or `all`, and a summary table (model × strategy) closes the run.
+- [x] **S2.1 `compare_asr.py --stream`.** First, so every strategy is measured the moment it exists. Feed a WAV in 50 ms frames at real-time pace through `open_stream` and `StreamingTranscription` (the real coalescing). Print each partial with its time offset (committed | tentative), then `partial_count`, median `partial_lag_ms`, `final_ms`, the final text and its word error rate (WER) against the reference `.txt` when one sits next to the WAV. `--strategy` picks one or `all`, and a summary table (model × strategy) closes the run.
   Done when: it runs on the fixture for both Whisper models with every strategy (all still `BatchStream`, so no partials yet), and the WER of the final text matches the batch run.
-- [ ] **S2.2 `chunked` (`ChunkedStream`).** Every `chunk_ms` of new audio is transcribed on its own, once, and appended to `committed`. A coalesced feed holding several chunks decodes each of them. `finish` transcribes the remainder (dropped if under `partial_min_audio_ms`) and returns the joined text (SPEC_v1 6.4).
+- [x] **S2.2 `chunked` (`ChunkedStream`).** Every `chunk_ms` of new audio is transcribed on its own, once, and appended to `committed`. A coalesced feed holding several chunks decodes each of them. `finish` transcribes the remainder (dropped if under `partial_min_audio_ms`) and returns the joined text (SPEC_v1 6.4).
   Done when: unit tests with a scripted fake batch model show each sample decoded exactly once, chunks cut at `chunk_ms`, and the remainder rule; `compare_asr.py --stream --strategy chunked` runs on the fixture with `chunk_ms` 500, 1000 and 2000, with the numbers in the Notes.
 - [ ] **S2.3 LocalAgreement-2.** `backend/asr/agreement.py`, a pure function: given the committed words and the last two decodes, return the new committed text and the tentative tail. Compare words ignoring case and punctuation, but output the decode's own spelling. Committed text never shrinks.
   Done when: unit tests cover agreement growth, a disagreeing middle word, a decode that shortens, punctuation-only changes, and an empty decode.
@@ -138,5 +138,15 @@ Goal: native streaming. Mind the slow PyPI downloads (PROGRESS Known Issues).
 
   Earlier runs on the same clip gave 1507 ms (large-v3) and 416 ms (turbo), so the numbers are stable to within about 10%. Live in Chrome, one 4.6 s utterance on large-v3 gave `asr_ms` 1.16 s and first token 847 ms. Turbo has no live number yet; S5.1 records one.
 - **Why chunks are not free for Whisper:** Whisper pads every input to a 30 s window, so its encoder costs about the same for 0.5 s as for 20 s. A decode's cost grows mostly with the number of output tokens (the decoder). So `chunked` saves less time than it seems and loses context, while `redecode` costs more per partial as the text grows (on large-v3, a long turn may take well over 1 s per decode). `trimmed` keeps the decoded text short. S2.7 measures all three.
-- **Strategy results (S2.2-S2.7):** _to fill in._
+- **Real-time bench (S2.1),** `compare_asr.py --stream` on the fixture, interval 500 ms, 2026-10-14. The final WER of `chunked` and `redecode` equals the batch run while both are still `BatchStream` (large-v3 0.0 %, turbo 4.2 %).
+- **`chunked` (S2.2),** turbo, one run each:
+
+  | `chunk_ms` | partials | median lag | `final_ms` | WER, remainder dropped (min 1000) | WER, remainder decoded |
+  |---|---|---|---|---|---|
+  | 500 | 19 | 195 ms | 193 ms | 66.7 % | 70.8 % ("Yeah." from trailing silence) |
+  | 1000 | 9 | 227 ms | 181 ms | 29.2 % | 37.5 % ("Thank you." appended) |
+  | 2000 | 4 | 247 ms | 262 ms | 16.7 % | 16.7 % |
+
+  Batch is 4.2 % at about 420 ms. Longer chunks read better, but the first text appears later. Even 2000 ms garbles words at the cuts ("originally Greek", "of of rocky"). See DECISIONS 2026-10-14 for the remainder rule.
+- **Strategy results (S2.4-S2.7):** _to fill in._
 - **Testing:** real model weights stay out of pytest, as in v0. A test that needs NeMo or the weights is skipped when they are missing.
