@@ -51,8 +51,8 @@ def test_turn_over_the_length_cap_is_rejected_and_the_connection_survives(caplog
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
         turn_id = send_turn(ws, pcm(31))  # frames keep arriving after the cap is hit
-        error = ws.receive_json()
-        assert error["type"] == "error" and error["turn_id"] == turn_id
+        error = read_until(ws, "error")[-1]  # partials of the first seconds may come first
+        assert error["turn_id"] == turn_id
         assert "30" in error["message"]  # says what the limit is
 
         # The rejected turn never reached the model, and the next turn works.

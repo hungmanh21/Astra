@@ -6,7 +6,13 @@ from pathlib import Path
 
 import numpy as np
 
-from backend.asr.base import PartialResult, TranscriptResult, UnknownASRModel, UnsupportedStrategy
+from backend.asr.base import (
+    ASRError,
+    PartialResult,
+    TranscriptResult,
+    UnknownASRModel,
+    UnsupportedStrategy,
+)
 from backend.asr.registry import ASRModelConfig
 from backend.asr.service import ModelStrategies, OpenedStream
 from backend.audio import SAMPLE_RATE
@@ -63,6 +69,29 @@ class FakeClock:
 
     def advance(self, seconds: float) -> None:
         self.now += seconds
+
+
+class RecordingModel:
+    """An ASRModel (batch only) that returns scripted texts, then `w<n>`, and records calls."""
+
+    def __init__(self, texts: list[str] | None = None, fail_on: set[int] | None = None) -> None:
+        self.texts = list(texts or [])
+        self.fail_on = fail_on or set()  # 1-based call numbers that raise ASRError
+        self.calls: list[np.ndarray] = []
+        self.kwargs: list[dict] = []
+        self.attempts = 0
+
+    def load(self) -> None:  # pragma: no cover - never called
+        pass
+
+    def transcribe(self, audio, sample_rate=16000, language=None) -> TranscriptResult:
+        self.attempts += 1
+        if self.attempts in self.fail_on:
+            raise ASRError("decode failed")
+        self.calls.append(np.array(audio, copy=True))
+        self.kwargs.append({"sample_rate": sample_rate, "language": language})
+        text = self.texts.pop(0) if self.texts else f"w{len(self.calls)}"
+        return TranscriptResult(text, "en", len(audio) / sample_rate, 5.0)
 
 
 class FakeTurnStream:

@@ -18,6 +18,7 @@ from backend.asr.registry import ASRRegistry
 from backend.asr.strategies import (
     BatchStream,
     ChunkedStream,
+    RedecodeStream,
     default_strategy,
     supported_strategies,
 )
@@ -116,7 +117,8 @@ class TranscriptionService:
 
         Input:  strategy - one of strategies(model_name).supported.
         Output: OpenedStream. "native" gives the adapter's own open_stream(); "chunked" a
-                ChunkedStream; every other strategy a BatchStream until S2 replaces them.
+                ChunkedStream; "redecode" a RedecodeStream; every other strategy a
+                BatchStream until S2 replaces them.
         Raises: UnknownASRModel; UnsupportedStrategy (also for a name that is not a strategy
                 at all) BEFORE loading anything, so a bad request never costs a model load;
                 ASRError for anything else, wrapped like transcribe().
@@ -133,6 +135,9 @@ class TranscriptionService:
             return OpenedStream(model.open_stream(16000, "en"), load_ms)
         if strategy == "chunked":
             return OpenedStream(ChunkedStream(model, chunk_ms=self._streaming.chunk_ms), load_ms)
+        if strategy == "redecode":
+            stream = RedecodeStream(model, min_audio_ms=self._streaming.partial_min_audio_ms)
+            return OpenedStream(stream, load_ms)
         return OpenedStream(BatchStream(model), load_ms)
 
     async def preload(self, model_name: str) -> None:

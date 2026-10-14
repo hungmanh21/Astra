@@ -69,7 +69,7 @@ Goal: real partials from the Whisper models we already have, in three ways that 
   Done when: unit tests with a scripted fake batch model show each sample decoded exactly once, chunks cut at `chunk_ms`, and the remainder rule; `compare_asr.py --stream --strategy chunked` runs on the fixture with `chunk_ms` 500, 1000 and 2000, with the numbers in the Notes.
 - [x] **S2.3 LocalAgreement-2.** `backend/asr/agreement.py`, a pure function: given the committed words and the last two decodes, return the new committed text and the tentative tail. Compare words ignoring case and punctuation, but output the decode's own spelling. Committed text never shrinks.
   Done when: unit tests cover agreement growth, a disagreeing middle word, a decode that shortens, punctuation-only changes, and an empty decode.
-- [ ] **S2.4 `redecode` (`RedecodeStream`).** Keeps the turn's audio, re-transcribes everything on `feed` once `partial_min_audio_ms` is reached, and applies S2.3. `finish` runs one full decode.
+- [x] **S2.4 `redecode` (`RedecodeStream`).** Keeps the turn's audio, re-transcribes everything on `feed` once `partial_min_audio_ms` is reached, and applies S2.3. `finish` runs one full decode.
   Done when: tests with a scripted fake show committed growth across feeds, no partial before the minimum audio, and a `finish` result equal to the plain `transcribe` result; `compare_asr.py --stream --strategy redecode` on the fixture is in the Notes.
 - [ ] **S2.5 Whisper segments and prompt.** Make `WhisperASR` a `SegmentedASRModel`: `transcribe_segments` returns segments with start and end times (pipeline timestamps) and takes an optional text prompt (Whisper `prompt_ids`). This is a capability of the adapter, not a special case in the session.
   Done when: on the fixture, the segments' text joined equals the plain transcript (apart from spacing), the timestamps increase and lie inside the clip, and a prompt run still gives sensible text (checked with `compare_asr.py`; the adapter's unit test uses a stubbed pipeline).
@@ -148,5 +148,13 @@ Goal: native streaming. Mind the slow PyPI downloads (PROGRESS Known Issues).
   | 2000 | 4 | 247 ms | 262 ms | 16.7 % | 16.7 % |
 
   Batch is 4.2 % at about 420 ms. Longer chunks read better, but the first text appears later. Even 2000 ms garbles words at the cuts ("originally Greek", "of of rocky"). See DECISIONS 2026-10-14 for the remainder rule.
-- **Strategy results (S2.4-S2.7):** _to fill in._
+- **`redecode` (S2.4),** fixture, interval 500 ms, minimum 1000 ms, one run each (2026-10-14):
+
+  | Model | partials | median lag | `final_ms` | batch `asr_ms` | WER (both) |
+  |---|---|---|---|---|---|
+  | `whisper-large-v3-turbo` | 17 | 304 ms (222 first, 401 last) | 839 ms | 400 ms | 4.2 % |
+  | `whisper-large-v3` | 10 | 784 ms (434 first, 1254 last) | 3199 ms | 1562 ms | 0.0 % |
+
+  The final text equals batch on both. Settled words trail the newest by about one decode ("He has grasped." became "He has grave doubts" before "He has" was committed), and the tentative tail shows mistakes the next decode removes ("rocky Ithanae." then "Ithaca."). The lag grows with the turn because every decode covers all the audio; large-v3 takes 1.5 s per decode, so it cannot keep the 500 ms pace (10 partials instead of 17). **`final_ms` is about twice a full decode**, not one as SPEC_v1 6.3 expects: at `end_turn` the remaining audio is fed (a full decode whose partial is dropped) and `finish` then decodes again. Not yet separated from a decode already in flight.
+- **Strategy results (S2.6-S2.7):** _to fill in._
 - **Testing:** real model weights stay out of pytest, as in v0. A test that needs NeMo or the weights is skipped when they are missing.

@@ -6,6 +6,7 @@ real `ChunkedStream`, `RedecodeStream` and `TrimmedStream` to this file.
 
 import numpy as np
 
+from backend.asr.agreement import local_agreement
 from backend.asr.base import (
     ASRModel,
     PartialResult,
@@ -161,4 +162,81 @@ class ChunkedStream:
             language="en",
             duration_s=self._total_samples / self._sample_rate,
             latency_ms=latency_ms,
+        )
+
+
+class RedecodeStream:
+    """The `redecode` strategy: every feed transcribes the whole turn again.
+
+    The text is what the model hears with all the audio so far, so it has full context.
+    LocalAgreement-2 (`local_agreement`) splits each decode into committed words, which
+    two decodes in a row agree on, and a tentative tail. `finish` runs one plain full
+    decode, so the final transcript equals v0's. Works with any ASRModel.
+    """
+
+    def __init__(
+        self,
+        model: ASRModel,
+        *,
+        min_audio_ms: int,
+        sample_rate: int = 16000,
+        language: str = "en",
+    ) -> None:
+        self._model = model
+        self._min_samples = min_audio_ms * sample_rate // 1000  # no partial before this much audio
+        self._sample_rate = sample_rate
+        self._language = language
+        self._audio: list[np.ndarray] = []  # the whole turn, oldest first
+        self._total_samples = 0
+        self._committed = ""  # committed text so far
+        self._previous = ""  # text of the last successful decode
+        self._shown = ("", "")  # (committed, tentative) of the last partial returned
+
+    def feed(self, audio: np.ndarray) -> PartialResult | None:
+        """Add `audio`, then (once enough audio exists) decode the whole turn again.
+
+        Input:  audio - the NEW samples (float32). Copy what you keep: the caller may reuse
+                the array. Keep it BEFORE decoding, so a failed decode loses nothing.
+        Output: None while the turn holds less than `min_audio_ms`. After that, decode ALL
+                the audio so far with one `model.transcribe` call and return
+                PartialResult(committed, tentative) from
+                `local_agreement(self._committed, self._previous, text)`, updating
+                `_committed` and `_previous`. Return None instead when that (committed,
+                tentative) pair equals the last one returned (`_shown`), so silence or a
+                steady text does not send the same partial again.
+        Raises: whatever the model raises; `_committed` and `_previous` stay as they were.
+        """
+        self._audio.append(np.array(audio, dtype=np.float32, copy=True))
+        self._total_samples += len(audio)
+        if self._total_samples < self._min_samples:
+            return None
+
+        samples = np.concatenate(self._audio)
+        result = self._model.transcribe(
+            samples, sample_rate=self._sample_rate, language=self._language
+        )
+        new_committed, tentative = local_agreement(self._committed, self._previous, result.text)
+        # The decode counts as "the previous one" even when it shows nothing new.
+        self._committed = new_committed
+        self._previous = result.text
+        if (new_committed, tentative) == self._shown:
+            return None
+
+        self._shown = (new_committed, tentative)
+        return PartialResult(new_committed, tentative)
+
+    def finish(self) -> TranscriptResult:
+        """One plain decode of everything fed: the final transcript.
+
+        Output: the model's TranscriptResult, unchanged, so the text equals what v0's
+                single `transcribe` gives. A clip shorter than `min_audio_ms` is decoded
+                too: the minimum only gates partials. Nothing fed gives an empty result
+                (text "", language "en", duration 0.0, latency 0.0) without calling the model.
+        """
+        if self._total_samples == 0:
+            return TranscriptResult(text="", language="en", duration_s=0.0, latency_ms=0.0)
+
+        samples = np.concatenate(self._audio)
+        return self._model.transcribe(
+            samples, sample_rate=self._sample_rate, language=self._language
         )
