@@ -99,16 +99,39 @@ def test_a_segment_without_a_sentence_end_is_not_a_cut_point_but_later_ones_stil
     assert trim_point(segments, 4) == 2  # the whole run up to the full stop goes
 
 
-@pytest.mark.parametrize(
-    "text", ["Is it?", "Stop!", "Wait...", "Done.  ", ' He said "go."', "(Done.)"]
-)
+@pytest.mark.parametrize("text", ["Is it?", "Stop!", "Done.  ", ' He said "go."', "(Done.)"])
 def test_sentence_ends(text):
     assert trim_point([seg(text, 0, 1)], len(text.split())) == 1
 
 
-@pytest.mark.parametrize("text", ["Hello,", "and then:", "a b;", "no punctuation", "the 3.5"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Hello,",
+        "and then:",
+        "a b;",
+        "no punctuation",
+        "the 3.5",
+        "Wait...",  # trailing off: the sentence usually goes on
+        "Well, I was...",
+        "Well\u2026",
+        "...",
+        "Hmm. ...",
+        'He said "maybe..."',
+    ],
+)
 def test_not_sentence_ends(text):
     assert trim_point([seg(text, 0, 1)], len(text.split())) == 0
+
+
+def test_an_ellipsis_in_the_middle_of_a_segment_does_not_matter():
+    assert trim_point([seg("Well... I think so.", 0, 1)], 4) == 1
+
+
+def test_an_ellipsis_segment_does_not_stop_a_later_sentence_end_from_cutting():
+    segments = [seg("Well, I was...", 0, 1), seg("never mind.", 1, 2)]
+    assert trim_point(segments[:1], 3) == 0
+    assert trim_point(segments, 5) == 2  # the cut goes through to the real full stop
 
 
 def test_curly_closing_quotes_after_the_full_stop_still_count():

@@ -245,6 +245,15 @@ class RedecodeStream:
         )
 
 
+_SENTENCE_END = re.compile(r"[.?!][\"')\]\u201d\u2019]*$")
+_ELLIPSIS_END = re.compile(r"(\.\.\.|\u2026)[\"')\]\u201d\u2019]*$")
+
+
+def _ends_sentence(text: str) -> bool:
+    text = text.rstrip()
+    return bool(_SENTENCE_END.search(text)) and not _ELLIPSIS_END.search(text)
+
+
 def trim_point(segments: list[Segment], committed_words: int) -> int:
     """How many leading segments are settled enough to cut their audio away.
 
@@ -256,7 +265,8 @@ def trim_point(segments: list[Segment], committed_words: int) -> int:
                 that is only partly committed is never cut, and
               - segments[k-1] ends a sentence: its text, after trailing whitespace and closing
                 quotes or brackets (`"`, `'`, `)`, `]`, and the curly `\u201d`, `\u2019`)
-                are removed, ends with ".", "?" or "!".
+                are removed, ends with ".", "?" or "!" and is not a trailing-off ellipsis
+                ("..." or "\u2026"): the speaker usually goes on after those.
             Example: segments "Hello there." / "How are" / "you today?" with 4 committed
             words -> 1 (the second segment is not a sentence end, so the cut stops before it);
             with 6 committed words -> 3.
@@ -267,7 +277,7 @@ def trim_point(segments: list[Segment], committed_words: int) -> int:
         words += len(segment.text.split())
         if words > committed_words:
             break
-        if re.search(r"[.?!][\"')\]\u201d\u2019]*$", segment.text.rstrip()):
+        if _ends_sentence(segment.text):
             best = k
     return best
 
