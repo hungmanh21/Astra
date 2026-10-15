@@ -6,6 +6,7 @@ the 12 GB RTX 3060. Besides plain `transcribe`, the adapter can return timestamp
 strategy.
 """
 
+import math
 import time
 from typing import Any
 
@@ -14,6 +15,26 @@ import numpy as np
 from backend.asr.base import ASRError, Segment, TranscriptResult
 
 MAX_PROMPT_TOKENS = 224  # Whisper reads at most half of its 448-token context as prompt
+MAX_TARGET_POSITIONS = 448  # the decoder context: prompt + special tokens + generated text
+RESERVED_TOKENS = 8  # start-of-transcript, language, task and timestamp tokens, with spare
+TOKENS_PER_SECOND = 12  # English speech is 4-8 tokens per second; this leaves room
+TOKEN_MARGIN = 16  # so a very short clip can still say a word or two
+
+
+def max_new_tokens(duration_s: float, prompt_tokens: int = 0) -> int:
+    """How many tokens Whisper may generate for `duration_s` seconds of audio.
+
+    Whisper stops on its own end token, but on a bad input (half a word in a 500 ms chunk) it
+    can loop on one phrase until the context is full. Speech cannot hold more than about
+    `TOKENS_PER_SECOND` tokens per second, so that is the budget (plus a small margin).
+
+    Input:  duration_s - length of the audio. prompt_tokens - length of the prompt ids that
+            go in front of the text (0 without a prompt); they use up the same context.
+    Output: at least 1; at most what is left of the context after the prompt.
+    """
+    budget = math.ceil(duration_s * TOKENS_PER_SECOND) + TOKEN_MARGIN
+    room = MAX_TARGET_POSITIONS - RESERVED_TOKENS - prompt_tokens
+    return max(1, min(budget, room))
 
 
 def segments_from_chunks(chunks: list[dict[str, Any]], duration_s: float) -> list[Segment]:
@@ -140,8 +161,12 @@ class WhisperASR:
         import torch
 
         generate_kwargs: dict[str, Any] = {"language": "en", "task": "transcribe"}
+        prompt_tokens = 0
         if prompt and prompt.strip():
-            generate_kwargs["prompt_ids"] = self._prompt_ids(prompt.strip())
+            ids = self._prompt_ids(prompt.strip())
+            generate_kwargs["prompt_ids"] = ids
+            prompt_tokens = len(ids)
+        generate_kwargs["max_new_tokens"] = max_new_tokens(len(audio) / sample_rate, prompt_tokens)
         # return_timestamps is only passed when asked for, so plain transcribe is unchanged.
         extra = {"return_timestamps": True} if timestamps else {}
         with torch.inference_mode():
