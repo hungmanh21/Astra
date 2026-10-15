@@ -455,3 +455,44 @@ def test_finish_raises_what_the_model_raises():
     stream.feed(MASTER[:STEP])
     with pytest.raises(ASRError):
         stream.finish()
+
+
+# --- finish(audio): the last samples arrive with finish, not through feed ---
+
+
+def test_finish_with_audio_decodes_the_window_once_with_the_extra_audio():
+    # The scenario's feed 6 goes to finish() instead: one decode fewer, same window.
+    model = RecordingSegmentedModel([*SCENARIO[:4], [seg("I am fine thanks.", 0.0, 1.2)]])
+    stream = stream_for(model)
+    feed_steps(stream, 5)
+    result = stream.finish(MASTER[5 * STEP : 6 * STEP])
+    assert len(model.calls) == 5  # 4 decodes from feeds 2-5, and one for finish
+    assert np.array_equal(model.calls[4], MASTER[36800:57600])
+    assert model.prompts[4] == "Hello there. How are you today?"
+    assert result.text == "Hello there. How are you today? I am fine thanks."
+    assert result.duration_s == 57600 / SR  # the extra audio counts
+
+
+def test_finish_with_audio_as_the_only_audio_decodes_it():
+    model = RecordingSegmentedModel([[seg("Hi.", 0.0, 0.2)]])
+    result = stream_for(model).finish(MASTER[:4800])
+    assert np.array_equal(model.calls[0], MASTER[:4800])
+    assert (result.text, result.duration_s) == ("Hi.", 0.3)
+
+
+@pytest.mark.parametrize("empty", [None, np.zeros(0, dtype=np.float32)])
+def test_finish_without_audio_is_the_plain_finish(empty):
+    model = RecordingSegmentedModel([[seg("Hi.", 0.0, 0.2)]])
+    stream = stream_for(model)
+    stream.feed(MASTER[:STEP])
+    assert stream.finish(empty).text == "Hi."
+    assert len(model.calls[0]) == STEP
+    assert stream_for(RecordingSegmentedModel([])).finish(empty).text == ""
+
+
+def test_finish_copies_the_audio_it_is_given():
+    model = RecordingSegmentedModel([[seg("x", 0.0, 0.5)]])
+    extra = MASTER[:STEP].copy()
+    stream_for(model).finish(extra)
+    extra[:] = 0.0
+    assert np.array_equal(model.calls[0], MASTER[:STEP])

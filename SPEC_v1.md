@@ -121,7 +121,8 @@ class ASRStream(Protocol):
     """One turn's stream. Every call is blocking and runs on the ASR worker thread."""
 
     def feed(self, audio: np.ndarray) -> PartialResult | None: ...  # new samples since last feed
-    def finish(self) -> TranscriptResult: ...  # final transcript of the whole turn
+    # final transcript of the whole turn; `audio` = the last samples, never fed
+    def finish(self, audio: np.ndarray | None = None) -> TranscriptResult: ...
 
 
 class StreamingASRModel(ASRModel, Protocol):  # optional capability: the `native` strategy
@@ -219,4 +220,4 @@ See [PLAN_v1.md](PLAN_v1.md):
 - [ ] Which chunk sizes the Nemotron checkpoint supports, and which one to default to. Settled in S4.
 - [x] Whether `whisper-large-v3` `redecode` is fast enough to be useful on the RTX 3060, or whether `trimmed` or turbo should be its recommended setup. **No: recommend `whisper-large-v3-turbo` for live partials.** On a 30 s turn large-v3 `redecode` has a `final_ms` of about 7.5 s and a median lag of 1.0-1.2 s, and `trimmed` on large-v3 drops or repeats sentences (DECISIONS 2026-10-15). large-v3 stays available for accuracy (its batch WER is 1.4-1.7 %).
 - [x] Which `chunk_ms` makes `chunked` usable at all. **2000** (WER 13.3 % on a 29.6 s clip; 1000 gives 30.0 %, 500 gives a repetition loop and 445 %). Even 2000 is far behind `redecode` (3.3 %).
-- [x] Default strategy for models without native streaming: **`redecode`**. Its final transcript equals the batch one (WER 3.3 % and 1.4 % against batch 3.3 % and 1.4 %); `trimmed` has a lower `final_ms` (1.2-1.6 s against 1.8-2.2 s on a 30 s turn, and it does not grow with the turn) and, with the minimum-window rule, a WER of 5.0 % and 0.0 % on turbo (against 3.3 % and 1.4 % for `redecode`).
+- [x] Default strategy for models without native streaming: **`redecode`**. Its final transcript equals the batch one (WER 3.3 % and 1.4 % against batch 3.3 % and 1.4 %); `trimmed` has a lower `final_ms` (0.7-0.9 s against 1.2-1.5 s on a 30 s turn, after the `finish(audio)` change; it does not grow with the turn) and, with the minimum-window rule, a WER of 5.0 % and 0.0 % on turbo (against 3.3 % and 1.4 % for `redecode`).

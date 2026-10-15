@@ -129,3 +129,10 @@
 ## 2026-10-15: `BatchStream` is deleted
 - Reason: since S2.6 every strategy has its own stream, so the v0-like placeholder was only used by its own tests.
 
+## 2026-10-15: `ASRStream.finish` takes the last audio, and Whisper's tokens are capped by the audio length
+- Reason (finish): `StreamingTranscription.finish` used to push the pending audio through one more `feed` and then call `finish()`. For `redecode` and `trimmed` that feed is a full decode whose partial is thrown away, so the final waited for two decodes. `finish(audio)` hands the audio over; the stream adds it and decodes once. Turbo, 30 s clips, `final_ms` before -> after: `redecode` 2229 -> 1217 (clip A) and 1803 -> 1469 (B); `trimmed` 1209 -> 691 and 1557 -> 892. WER unchanged. The wait for a decode already in flight stays, so the saving is one decode, not half.
+- Consequence: a failed last decode is no longer swallowed and retried by `finish`; it raises (the session turns it into an `asr_error`). `ChunkedStream.finish(audio)` feeds it like before, so chunks stay exactly `chunk_ms`.
+- Reason (token cap): `chunked` at 500 ms hit a Whisper repetition loop ("I'm sorry" over a hundred times in one chunk) because generation was only limited by the 448-token context. `max_new_tokens` is now `ceil(12 x seconds) + 16`, at most `448 - 8 - prompt tokens`. The same chunk now stops after five repeats (WER on clip A 445 % -> 93 %; the rest is the garbling of tiny chunks). A full 224-token prompt on a 29.6 s window still decodes. It applies to every Whisper call, including the plain v0 batch decode.
+- Rejected alternative (finish): skipping the flush feed when nothing is in flight cannot work, because `StreamingTranscription` does not know whether the stream decodes on every feed.
+- Risk (cap): a very fast speaker (over 12 tokens per second sustained) would be cut off. English speech is 4-8, and the clip is capped at 30 s.
+

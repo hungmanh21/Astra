@@ -132,8 +132,10 @@ class ScriptedStream:
         self.fed.append(np.array(audio, copy=True))
         return self._partials.pop(0) if self._partials else None
 
-    def finish(self) -> TranscriptResult:
+    def finish(self, audio: np.ndarray | None = None) -> TranscriptResult:
         self.finish_calls += 1
+        if audio is not None:  # the last samples count as fed, so tests can check all audio
+            self.fed.append(np.array(audio, copy=True))
         return TranscriptResult(self._final_text, "en", 0.0, 0.0)
 
 

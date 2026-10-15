@@ -129,6 +129,11 @@ def sizes(stream: FakeStream) -> list[int]:
     return [len(a) for a in stream.fed]
 
 
+def finish_size(stream: FakeStream) -> int | None:
+    """How many samples finish() was handed, None when it got no audio."""
+    return None if stream.finish_audio is None else len(stream.finish_audio)
+
+
 def test_no_feed_before_the_interval_has_gathered():
     async def scenario():
         async with rig() as r:
@@ -215,7 +220,7 @@ def test_every_sample_is_fed_exactly_once_and_in_order():
     asyncio.run(scenario())
 
 
-def test_finish_waits_for_the_feed_in_flight_then_feeds_the_remainder():
+def test_finish_waits_for_the_feed_in_flight_then_hands_it_the_remainder():
     async def scenario():
         async with rig(gated=True, final_text="all done") as r:
             nxt = push_interval(r.st)
@@ -231,17 +236,20 @@ def test_finish_waits_for_the_feed_in_flight_then_feeds_the_remainder():
             result = await asyncio.wait_for(finishing, timeout=2)
             assert isinstance(result, TranscriptResult)
             assert result.text == "all done"
-            assert sizes(r.stream) == [INTERVAL_SAMPLES, 2 * FRAME]
+            # The remainder is not fed: it goes to finish(), which decodes once.
+            assert sizes(r.stream) == [INTERVAL_SAMPLES]
+            assert finish_size(r.stream) == 2 * FRAME
             assert r.stream.finished
 
     asyncio.run(scenario())
 
 
-def test_finish_with_nothing_pending_does_not_feed():
+def test_finish_with_nothing_pending_gets_no_audio():
     async def scenario():
         async with rig() as r:
             result = await r.st.finish()
             assert r.stream.fed == []
+            assert r.stream.finish_audio is None
             assert r.stream.finished
             assert result.text == "final text"
 
@@ -249,20 +257,22 @@ def test_finish_with_nothing_pending_does_not_feed():
             push_interval(r.st)
             await wait_until(lambda: len(r.stream.fed) == 1)
             await r.st.finish()
-            assert sizes(r.stream) == [INTERVAL_SAMPLES]  # no empty extra feed
+            assert sizes(r.stream) == [INTERVAL_SAMPLES]  # no extra feed
+            assert r.stream.finish_audio is None  # and no empty array either
 
     asyncio.run(scenario())
 
 
-def test_the_remainder_feed_does_not_deliver_a_partial():
+def test_the_remainder_does_not_produce_a_partial():
     async def scenario():
         async with rig(partials=(PartialResult("a", ""), PartialResult("a b", ""))) as r:
             nxt = push_interval(r.st)
             await wait_until(lambda: len(r.got) == 1)
-            r.st.push(ramp(FRAME, nxt))  # below the interval: only finish() will feed it
+            r.st.push(ramp(FRAME, nxt))  # below the interval: only finish() will see it
             await r.st.finish()
-            assert len(r.stream.fed) == 2
-            assert len(r.got) == 1  # the second scripted partial was dropped
+            assert len(r.stream.fed) == 1  # the remainder is no feed
+            assert finish_size(r.stream) == FRAME
+            assert len(r.got) == 1  # the second scripted partial was never asked for
 
     asyncio.run(scenario())
 
@@ -349,7 +359,7 @@ def test_a_failing_final_transcript_raises_out_of_finish():
     async def scenario():
         async with rig() as r:
 
-            def broken():
+            def broken(audio=None):
                 raise RuntimeError("no final")
 
             r.stream.finish = broken

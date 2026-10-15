@@ -109,9 +109,11 @@ class ChunkedStream:
             return None
         return PartialResult(committed=" ".join(self._texts), tentative="")
 
-    def finish(self) -> TranscriptResult:
+    def finish(self, audio: np.ndarray | None = None) -> TranscriptResult:
         """Decode the remainder, however short, and return the whole turn's text.
 
+        Input:  audio - the last samples, if any: fed first, like one more `feed` (its
+                complete chunks are decoded as chunks), and only then the remainder.
         Output: TranscriptResult(text=all chunk texts joined by one space, language="en",
                 duration_s=all audio fed, in seconds,
                 latency_ms=the model's own latency_ms for the remainder decode, 0.0 when
@@ -119,6 +121,9 @@ class ChunkedStream:
                 Nothing fed gives an empty result without calling the model. A very short
                 remainder can make Whisper invent text; the bench shows whether it does.
         """
+        if audio is not None and len(audio):
+            self.feed(audio)  # the partial it returns is not wanted
+
         latency_ms = 0.0
         if self._pending_samples > 0:
             result = self._model.transcribe(
@@ -198,14 +203,19 @@ class RedecodeStream:
         self._shown = (new_committed, tentative)
         return PartialResult(new_committed, tentative)
 
-    def finish(self) -> TranscriptResult:
+    def finish(self, audio: np.ndarray | None = None) -> TranscriptResult:
         """One plain decode of everything fed: the final transcript.
 
+        Input:  audio - the last samples, if any. They are added to the turn first, with no
+                decode of their own: that is the point, `finish` decodes once.
         Output: the model's TranscriptResult, unchanged, so the text equals what v0's
                 single `transcribe` gives. A clip shorter than `min_audio_ms` is decoded
                 too: the minimum only gates partials. Nothing fed gives an empty result
                 (text "", language "en", duration 0.0, latency 0.0) without calling the model.
         """
+        if audio is not None and len(audio):
+            self._audio.append(np.array(audio, dtype=np.float32, copy=True))
+            self._total_samples += len(audio)
         if self._total_samples == 0:
             return TranscriptResult(text="", language="en", duration_s=0.0, latency_ms=0.0)
 
@@ -358,9 +368,11 @@ class TrimmedStream:
         self._shown = shown
         return PartialResult(*shown)
 
-    def finish(self) -> TranscriptResult:
+    def finish(self, audio: np.ndarray | None = None) -> TranscriptResult:
         """Decode only the window and return the whole turn's text: settled + the tail.
 
+        Input:  audio - the last samples, if any. They join the window first, with no decode
+                of their own, so `finish` decodes once.
         Output: TranscriptResult(text=`_settled` and the window's decode (segments joined
                 like in `feed`, prompted with `_settled`), joined by one space, language="en",
                 duration_s=ALL the audio fed, cut or not, latency_ms=the decode's latency).
@@ -370,6 +382,9 @@ class TrimmedStream:
                 than `min_audio_ms` is decoded too: the minimum only gates partials.
         Raises: whatever the model raises.
         """
+        if audio is not None and len(audio):
+            self._window.append(np.array(audio, dtype=np.float32, copy=True))
+            self._total_samples += len(audio)
         if self._total_samples == 0:
             return TranscriptResult(text="", language="en", duration_s=0.0, latency_ms=0.0)
 

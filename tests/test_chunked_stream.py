@@ -212,3 +212,42 @@ def test_other_chunk_lengths_cut_where_they_say():
     stream = stream_for(model, chunk_ms=1000)
     stream.feed(audio_of(2 * SR + 5000))
     assert [len(c) for c in model.calls] == [SR, SR]
+
+
+# --- finish(audio): the last samples arrive with finish, not through feed ---
+
+
+def test_finish_with_audio_decodes_its_whole_chunks_and_then_the_remainder():
+    model = RecordingModel(["one", "two", "tail"])
+    stream = stream_for(model)
+    stream.feed(audio_of(REST))  # 4000: less than a chunk
+    result = stream.finish(audio_of(2 * CHUNK, start=REST))  # 20000 in all: 2 chunks + 4000
+    assert [len(c) for c in model.calls] == [CHUNK, CHUNK, REST]
+    assert result.text == "one two tail"
+    assert result.duration_s == pytest.approx((REST + 2 * CHUNK) / SR)
+
+
+def test_finish_with_audio_equals_feeding_it_and_then_finishing():
+    texts = ["a", "b", "c"]
+    fed_first = RecordingModel(texts)
+    first = stream_for(fed_first)
+    first.feed(audio_of(REST))
+    first.feed(audio_of(CHUNK + REST, start=REST))
+    expected = first.finish()
+
+    given_to_finish = RecordingModel(texts)
+    second = stream_for(given_to_finish)
+    second.feed(audio_of(REST))
+    result = second.finish(audio_of(CHUNK + REST, start=REST))
+
+    assert result.text == expected.text
+    assert [c.tolist() for c in given_to_finish.calls] == [c.tolist() for c in fed_first.calls]
+
+
+@pytest.mark.parametrize("empty", [None, np.zeros(0, dtype=np.float32)])
+def test_finish_without_audio_is_the_plain_finish(empty):
+    model = RecordingModel(["tail"])
+    stream = stream_for(model)
+    stream.feed(audio_of(REST))
+    assert stream.finish(empty).text == "tail"
+    assert len(model.calls) == 1

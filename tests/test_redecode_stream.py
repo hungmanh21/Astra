@@ -202,3 +202,44 @@ def test_each_stream_has_its_own_state():
     a.feed(audio_of(MIN - 100))
     assert b.feed(audio_of(200)) is None  # a's audio did not count for b
     assert model.calls == []
+
+
+# --- finish(audio): the last samples arrive with finish, not through feed ---
+
+
+def test_finish_with_audio_decodes_everything_once_with_no_decode_for_the_extra_audio():
+    model = RecordingModel(["he has", "he has grave doubts"])
+    stream = stream_for(model)
+    stream.feed(audio_of(MIN))  # decode 1: a partial
+    result = stream.finish(audio_of(STEP, start=MIN))
+    assert len(model.calls) == 2  # the partial's decode and the final one, nothing else
+    assert np.array_equal(model.calls[1], audio_of(MIN + STEP))
+    assert result.text == "he has grave doubts"
+    assert result.duration_s == pytest.approx((MIN + STEP) / SR)
+
+
+def test_finish_with_audio_as_the_only_audio_decodes_it():
+    model = RecordingModel(["hi"])
+    result = stream_for(model).finish(audio_of(4800))  # shorter than the minimum: still decoded
+    assert np.array_equal(model.calls[0], audio_of(4800))
+    assert (result.text, result.duration_s) == ("hi", pytest.approx(0.3))
+
+
+@pytest.mark.parametrize("empty", [None, np.zeros(0, dtype=np.float32)])
+def test_finish_without_audio_is_the_plain_finish(empty):
+    model = RecordingModel(["a", "b"])
+    stream = stream_for(model)
+    stream.feed(audio_of(MIN))
+    assert stream.finish(empty).text == "b"
+    assert len(model.calls[1]) == MIN
+
+    assert stream_for(RecordingModel()).finish(empty).text == ""  # nothing at all: no model call
+
+
+def test_finish_copies_the_audio_it_is_given():
+    model = RecordingModel(["x"])
+    extra = audio_of(MIN)
+    stream = stream_for(model)
+    stream.finish(extra)
+    extra[:] = 0.0
+    assert np.array_equal(model.calls[0], audio_of(MIN))

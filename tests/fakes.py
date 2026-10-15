@@ -31,6 +31,7 @@ class FakeStream:
         self._feed_error = feed_error
         self._feed_gate = feed_gate
         self.fed: list[np.ndarray] = []  # every feed's audio, in order
+        self.finish_audio: np.ndarray | None = None  # what finish() was handed, if anything
         self.finished = False
 
     def feed(self, audio: np.ndarray) -> PartialResult | None:
@@ -52,9 +53,11 @@ class FakeStream:
                 raise TimeoutError("feed gate was never opened")
             gate.wait(0.05)
 
-    def finish(self) -> TranscriptResult:
+    def finish(self, audio: np.ndarray | None = None) -> TranscriptResult:
         self.finished = True
-        samples = sum(len(a) for a in self.fed)
+        if audio is not None:
+            self.finish_audio = np.array(audio, dtype=np.float32, copy=True)
+        samples = len(self.samples)
         return TranscriptResult(
             text=self._final_text,
             language="en",
@@ -64,8 +67,9 @@ class FakeStream:
 
     @property
     def samples(self) -> np.ndarray:
-        """Everything fed so far, joined."""
-        return np.concatenate(self.fed) if self.fed else np.zeros(0, dtype=np.float32)
+        """Everything the stream was given so far (feeds, then finish's audio), joined."""
+        parts = [*self.fed] + ([] if self.finish_audio is None else [self.finish_audio])
+        return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
 
 
 class FakePlainASR:

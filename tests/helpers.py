@@ -142,7 +142,8 @@ class FakeTurnStream:
             raise self._feed_error
         return self._partials.pop(0) if self._partials else None
 
-    def finish(self) -> TranscriptResult:  # the real work is faked in FakeTranscriber.run
+    def finish(self, audio: np.ndarray | None = None) -> TranscriptResult:
+        # the real work is faked in FakeTranscriber.run
         raise AssertionError("FakeTranscriber.run answers finish")
 
     @property
@@ -230,6 +231,8 @@ class FakeTranscriber:
                         await self.feed_gate.wait()
                     self._advance(self._next_feed_takes())
                 else:
+                    if args and args[0] is not None:  # finish(audio): the last samples
+                        stream.fed.append(np.array(args[0], copy=True))
                     return await self._final(stream)
             except asyncio.CancelledError:
                 self.cancelled = True

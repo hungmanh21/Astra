@@ -84,18 +84,11 @@ class StreamingTranscription:
             # _feed_once handles its own errors, so waiting for it cannot raise.
             await asyncio.wait({self._task})
 
-        if self._pending_samples > 0:
-            # The strategies need all the audio to build the final, even when partials are off.
-            # The partial this returns is dropped: `transcript` goes out right after, and a
-            # `partial` after a `transcript` is a bug (SPEC_v1 6.2).
-            audio, _ = self._take_pending()
-            try:
-                await self._run(self._stream.feed, audio)
-            except Exception:
-                if self._partials_on:  # otherwise the first failure was already logged
-                    log.warning("feeding the last audio failed, the final decides", exc_info=True)
-
-        return await self._run(self._stream.finish)
+        # The strategies need all the audio to build the final, even when partials are off.
+        # It goes to `finish` instead of one more `feed`: that partial would be dropped (a
+        # `partial` after the `transcript` is a bug, SPEC_v1 6.2) and its decode wasted.
+        audio = self._take_pending()[0] if self._pending_samples > 0 else None
+        return await self._run(self._stream.finish, audio)
 
     async def close(self) -> None:
         """Abandon the turn (disconnect, rejected turn, reset). Safe to call twice.

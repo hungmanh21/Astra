@@ -86,9 +86,12 @@ class ASRStream(Protocol):
         """
         ...
 
-    def finish(self) -> TranscriptResult:
+    def finish(self, audio: np.ndarray | None = None) -> TranscriptResult:
         """Final transcript of the whole turn. Called once, after the last feed.
 
+        Input:  audio - the last samples, which were never fed (None when there are none).
+                The stream treats them as one more feed whose partial nobody wants, so a
+                strategy that decodes on every feed decodes once instead of twice.
         Output: TranscriptResult. latency_ms covers this call only (the v0 `asr_ms`).
         Raises: ASRError if inference fails.
         """
