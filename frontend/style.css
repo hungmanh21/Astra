@@ -105,6 +105,7 @@ button:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .bubble .text { white-space: pre-wrap; }
 .bubble .text.pending { color: var(--muted); font-style: italic; }
+.bubble .text .tentative { color: var(--muted); }
 .bubble .meta { margin-top: 4px; font-size: 0.75rem; color: var(--muted); }
 .bubble textarea {
   width: min(60ch, 70vw);
