@@ -120,3 +120,12 @@
 - large-v3 is not recommended for live partials on the RTX 3060: on 30 s turns `redecode` has a lag of 1.0-1.2 s and a `final_ms` of 7.5 s, and `trimmed` is unreliable (its timestamped text sometimes loses punctuation, so it never cuts and the lag grows to 3 s; with a prompt it dropped a whole sentence on clip A and repeated the last sentence on clip B). Turbo with `redecode` is the live setup; large-v3 remains the accuracy option.
 - Constraint: `trimmed` costs 4-5 WER points on turbo on natural speech (SPEC_v1 asks for "a small margin"). The causes seen: a hallucinated "Thank you." from the short window left at the end, and a prompt-driven change of punctuation (`is...`, `British?`). It stays opt-in. Not tried: refusing to cut when the leftover window would be short.
 
+## 2026-10-15: `trimmed` never cuts the window below `partial_min_audio_ms`
+- Reason: on natural speech `trimmed` ended with a hallucinated "Thank you." and lost 4-5 WER points, because the final decode ran on the short window left after the last cut. A cut now has to leave at least `partial_min_audio_ms` (1000 ms) of audio; if the last sentence end is too late, the one before it is used (`trim_point(..., latest_end_s)`). The limit is computed in whole samples, because a limit in seconds is wrong at the boundary (2.4 - 1.5 is 0.8999... in floats).
+- Measured (turbo, clips A and B, minimum 0 / 1000 / 2000 / 3000 ms): WER A 8.3 / 5.0 / 5.0 / 5.0 %, B 5.8 / 1.4 / 0.0 / 0.0 %; `final_ms` A 536 / 1300 / 1563 / 1341, B 476 / 1481 / 2049 / 1569. 1000 ms gives most of the gain; longer costs `final_ms` for nothing on A. Final code: A 5.0 % / 1209 ms, B 0.0 % / 1557 ms. `redecode`: 3.3 % / 2229 ms and 1.4 % / 1803 ms.
+- Rejected alternative: a separate config key for the minimum. The reason is the same as for `partial_min_audio_ms` (Whisper invents text on tiny clips), so the stream takes `min_tail_ms` (default `min_audio_ms`) and the service passes nothing.
+- Cost: the cut comes later, so `final_ms` is about 0.7-1.0 s above the uncut-tail version, but still below `redecode` and not growing with the turn.
+
+## 2026-10-15: `BatchStream` is deleted
+- Reason: since S2.6 every strategy has its own stream, so the v0-like placeholder was only used by its own tests.
+

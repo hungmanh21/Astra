@@ -1,7 +1,8 @@
-"""Which streaming strategies a model supports, and the placeholder stream (PLAN_v1 S1.5).
+"""Which streaming strategies a model supports, and the Whisper-side streams (PLAN_v1 S1.5, S2).
 
-Strategies come from what an adapter can do, never from its name (SPEC_v1 6.4). S2 adds the
-real `ChunkedStream`, `RedecodeStream` and `TrimmedStream` to this file.
+Strategies come from what an adapter can do, never from its name (SPEC_v1 6.4). The generic
+`ChunkedStream` and `RedecodeStream` and the segment-based `TrimmedStream` live here; the
+`native` stream belongs to the adapter.
 """
 
 import re
@@ -47,37 +48,6 @@ def default_strategy(model: ASRModel, fallback: str) -> str:
     if isinstance(model, StreamingASRModel):
         return "native"
     return fallback
-
-
-class BatchStream:
-    """Stands in for every non-native strategy until S2: it behaves exactly like v0.
-
-    `feed` keeps the audio and shows no partial. `finish` transcribes the whole turn in one
-    go. Each stream has its own buffer, even for two streams on the same model.
-    """
-
-    def __init__(self, model: ASRModel, sample_rate: int = 16000, language: str = "en") -> None:
-        self._audio: list[np.ndarray] = []  # joined once, in finish()
-        self._model = model
-        self._sample_rate = sample_rate
-        self._language = language
-
-    def feed(self, audio: np.ndarray) -> PartialResult | None:
-        """Store `audio` (copy it: the caller may reuse its array) and return None."""
-        self._audio.append(np.array(audio, dtype=np.float32, copy=True))
-        return None
-
-    def finish(self) -> TranscriptResult:
-        """Transcribe everything fed, in order, with one `model.transcribe` call.
-
-        Output: the model's TranscriptResult unchanged. If nothing was fed, return an empty
-                result (text "", language "en", duration 0.0, latency 0.0) without calling
-                the model: a real model may fail on empty audio.
-        """
-        if not self._audio:
-            return TranscriptResult(text="", language="en", duration_s=0.0, latency_ms=0.0)
-        audio = np.concatenate(self._audio)
-        return self._model.transcribe(audio, sample_rate=self._sample_rate, language=self._language)
 
 
 class ChunkedStream:
@@ -254,12 +224,16 @@ def _ends_sentence(text: str) -> bool:
     return bool(_SENTENCE_END.search(text)) and not _ELLIPSIS_END.search(text)
 
 
-def trim_point(segments: list[Segment], committed_words: int) -> int:
+def trim_point(
+    segments: list[Segment], committed_words: int, latest_end_s: float | None = None
+) -> int:
     """How many leading segments are settled enough to cut their audio away.
 
     Input:  segments - the segments of the latest decode of the window, in time order.
             committed_words - how many leading words of that decode are committed
             (LocalAgreement). A segment's words are what `segment.text.split()` gives.
+            latest_end_s - when given, a segment that ends after this many seconds is not a
+            cut point, so the cut leaves enough audio in the window (see TrimmedStream).
     Output: the largest k such that BOTH hold, or 0 when no k does:
               - the words of segments[:k] together are at most `committed_words`: a segment
                 that is only partly committed is never cut, and
@@ -277,7 +251,7 @@ def trim_point(segments: list[Segment], committed_words: int) -> int:
         words += len(segment.text.split())
         if words > committed_words:
             break
-        if _ends_sentence(segment.text):
+        if _ends_sentence(segment.text) and (latest_end_s is None or segment.end_s <= latest_end_s):
             best = k
     return best
 
@@ -304,10 +278,16 @@ class TrimmedStream:
         model: SegmentedASRModel,
         *,
         min_audio_ms: int,
+        min_tail_ms: int | None = None,
         sample_rate: int = 16000,
     ) -> None:
         self._model = model
         self._min_samples = min_audio_ms * sample_rate // 1000  # no partial before this much audio
+        # A cut must leave at least this much audio in the window: Whisper invents text ("Thank
+        # you.") on a window of a second or less. The same reason as `min_audio_ms`, so it is
+        # the default.
+        tail_ms = min_audio_ms if min_tail_ms is None else min_tail_ms
+        self._min_tail_samples = tail_ms * sample_rate // 1000
         self._sample_rate = sample_rate
         self._window: list[np.ndarray] = []  # audio after the last cut, oldest first
         self._total_samples = 0  # everything ever fed, cut or not
@@ -327,7 +307,9 @@ class TrimmedStream:
                   1. text = the segments' texts, stripped, joined by single spaces.
                   2. committed, tentative = `local_agreement(self._committed, self._previous,
                      text)`.
-                  3. k = `trim_point(segments, number of words in committed)`. If k > 0:
+                  3. k = `trim_point(segments, number of words in committed, latest_end_s)`,
+                     where `latest_end_s` is the window's length in seconds minus
+                     `_min_tail_samples`. If k > 0:
                      drop the window audio up to `segments[k-1].end_s` (seconds counted from
                      the START OF THE WINDOW, not of the turn; clamp to the window length),
                      append the cut segments' text to `_settled`, and take their words off
@@ -356,7 +338,8 @@ class TrimmedStream:
         committed_words = committed.split()
 
         # From here on nothing can raise: the decode worked, so the state may change.
-        cut = trim_point(segments, len(committed_words))
+        latest_end_s = (len(window) - self._min_tail_samples) / self._sample_rate
+        cut = trim_point(segments, len(committed_words), latest_end_s)
         if cut:
             dropped = len(_join(segments[:cut]).split())
             # The committed spelling, not this decode's: what the user saw must not change.

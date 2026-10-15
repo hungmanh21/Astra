@@ -19,7 +19,6 @@ from backend.asr.base import (
 from backend.asr.registry import ASRModelConfig, ASRRegistry
 from backend.asr.service import TranscriptionService
 from backend.asr.strategies import (
-    BatchStream,
     ChunkedStream,
     RedecodeStream,
     TrimmedStream,
@@ -101,51 +100,6 @@ def test_strategy_choice_does_not_depend_on_the_model_name():
     # The same class under a Whisper-looking name gets the same answer.
     assert supported_strategies(FakePlainASR("whisper-large-v3")) == PLAIN
     assert supported_strategies(FakeStreamingASR("nemotron-streaming")) == STREAMING
-
-
-# --- BatchStream ---
-
-
-def test_batch_stream_shows_no_partials_and_transcribes_everything_once():
-    model = FakePlainASR("plain")
-    stream = BatchStream(model)
-    assert stream.feed(audio(1000, 0.1)) is None
-    assert stream.feed(audio(500, 0.2)) is None
-    assert FakePlainASR.transcribed == []  # feed never decodes
-
-    result = stream.finish()
-
-    assert len(FakePlainASR.transcribed) == 1
-    assert (
-        FakePlainASR.transcribed[0].tolist() == [np.float32(0.1)] * 1000 + [np.float32(0.2)] * 500
-    )
-    assert result.text == "plain text"
-    assert result.duration_s == pytest.approx(1500 / 16000)
-    assert result.latency_ms == 3.0  # the model's own number, like v0's asr_ms
-
-
-def test_batch_stream_copies_the_fed_audio():
-    stream = BatchStream(FakePlainASR("plain"))
-    frame = audio(100, 0.5)
-    stream.feed(frame)
-    frame[:] = 0.0  # the caller reuses its buffer
-    stream.finish()
-    assert FakePlainASR.transcribed[0].tolist() == [np.float32(0.5)] * 100
-
-
-def test_batch_streams_do_not_share_audio():
-    model = FakePlainASR("plain")
-    a, b = BatchStream(model), BatchStream(model)
-    a.feed(audio(100))
-    b.feed(audio(300))
-    a.finish()
-    assert [len(x) for x in FakePlainASR.transcribed] == [100]
-
-
-def test_batch_stream_with_no_audio_does_not_call_the_model():
-    result = BatchStream(FakePlainASR("plain")).finish()
-    assert FakePlainASR.transcribed == []
-    assert (result.text, result.duration_s, result.latency_ms) == ("", 0.0, 0.0)
 
 
 # --- TranscriptionService.strategies ---

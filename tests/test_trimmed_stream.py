@@ -46,8 +46,11 @@ SCENARIO = [
 ]
 
 
-def stream_for(model: RecordingSegmentedModel, min_ms: int = MIN_MS) -> TrimmedStream:
-    return TrimmedStream(model, min_audio_ms=min_ms)
+def stream_for(
+    model: RecordingSegmentedModel, min_ms: int = MIN_MS, min_tail_ms: int | None = 0
+) -> TrimmedStream:
+    # Most tests are about the cut itself, so by default a cut may leave any amount of audio.
+    return TrimmedStream(model, min_audio_ms=min_ms, min_tail_ms=min_tail_ms)
 
 
 def feed_steps(stream: TrimmedStream, count: int, first: int = 0) -> list[PartialResult | None]:
@@ -132,6 +135,14 @@ def test_an_ellipsis_segment_does_not_stop_a_later_sentence_end_from_cutting():
     segments = [seg("Well, I was...", 0, 1), seg("never mind.", 1, 2)]
     assert trim_point(segments[:1], 3) == 0
     assert trim_point(segments, 5) == 2  # the cut goes through to the real full stop
+
+
+@pytest.mark.parametrize(
+    ("latest_end_s", "expected"), [(None, 2), (2.0, 2), (1.5, 1), (0.99, 0), (0.0, 0)]
+)
+def test_trim_point_ignores_segments_that_end_after_latest_end_s(latest_end_s, expected):
+    segments = [seg("Hello there.", 0, 1), seg("How are you?", 1, 2)]
+    assert trim_point(segments, 5, latest_end_s) == expected
 
 
 def test_curly_closing_quotes_after_the_full_stop_still_count():
@@ -245,13 +256,48 @@ def test_one_cut_can_take_several_segments():
     assert np.array_equal(model.calls[2], MASTER[32000:84000])  # cut at 2.0 s
 
 
-def test_a_cut_past_the_end_of_the_window_empties_it():
-    model = RecordingSegmentedModel([[seg("Hello there.", 0.0, 5.0)]] * 2)
+def test_a_cut_at_the_very_end_of_the_window_empties_it():
+    # Decode 2 hears 1.2 s and its sentence ends at 1.2 s: with no minimum, the whole window goes.
+    scripts = [[seg("Hello there.", 0.0, 0.6)], [seg("Hello there.", 0.0, 1.2)]]
+    model = RecordingSegmentedModel(scripts)
     stream = stream_for(model, min_ms=500)
     feed_steps(stream, 2)
     result = stream.finish()
     assert len(model.calls) == 2  # nothing left to decode
-    assert result.text == "Hello there."
+    assert (result.text, result.duration_s) == ("Hello there.", 1.2)
+
+
+def test_a_cut_must_leave_the_minimum_audio_in_the_window():
+    # "Hello there." ends at 0.9 s. A cut leaves what is after it: 0.3 s at 1.2 s of audio and
+    # 0.9 s at 1.8 s, both under the 1 s minimum; at 2.4 s it leaves 1.5 s and the cut is made.
+    # A window under a second makes Whisper invent text.
+    model = RecordingSegmentedModel([[seg("Hello there.", 0.0, 0.9)]] * 5)
+    stream = stream_for(model, min_tail_ms=None)  # the default: min_audio_ms, 1 s here
+    feed_steps(stream, 5)
+    assert [len(c) for c in model.calls] == [19200, 28800, 38400, 33600]
+    assert model.prompts == [None, None, None, "Hello there."]
+    assert np.array_equal(model.calls[3], MASTER[14400 : 5 * STEP])  # the cut was at 0.9 s
+
+
+def test_min_tail_ms_sets_how_much_audio_a_cut_must_leave():
+    model = RecordingSegmentedModel([[seg("Hello there.", 0.0, 0.9)]] * 5)
+    stream = stream_for(model, min_tail_ms=1500)  # 2.4 s - 0.9 s = 1.5 s: just enough
+    feed_steps(stream, 5)
+    assert [len(c) for c in model.calls] == [19200, 28800, 38400, 33600]
+    model = RecordingSegmentedModel([[seg("Hello there.", 0.0, 0.9)]] * 5)
+    stream = stream_for(model, min_tail_ms=1501)
+    feed_steps(stream, 5)
+    assert [len(c) for c in model.calls] == [19200, 28800, 38400, 48000]
+
+
+def test_an_earlier_sentence_end_is_used_when_the_last_one_is_too_late():
+    two = [seg("Hello there.", 0.0, 0.9), seg("How are you?", 0.9, 1.7)]
+    model = RecordingSegmentedModel([two] * 4)
+    stream = stream_for(model, min_tail_ms=None)
+    feed_steps(stream, 5)
+    # At 2.4 s the second sentence (ends 1.7 s) would leave 0.7 s, the first leaves 1.5 s.
+    assert model.prompts[2:] == [None, "Hello there."]
+    assert np.array_equal(model.calls[3], MASTER[14400 : 5 * STEP])
 
 
 def test_segment_text_is_stripped_and_joined_by_single_spaces():

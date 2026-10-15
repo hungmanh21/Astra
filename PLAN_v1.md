@@ -203,7 +203,9 @@ Goal: native streaming. Mind the slow PyPI downloads (PROGRESS Known Issues).
 
   Interval sweep, turbo `redecode`, clip A: 250 ms gives 60 partials, lag 374 ms, `final_ms` 1672; 500 ms 45, 433 ms, 2229; 1000 ms 28, 453 ms, 1623 (WER 3.3 % each). `trimmed` at 1000 ms: 29 partials, 370 ms, 454 ms, 8.3 %. No FR-16 violation (committed text always extends) in any run after the S2.6 spelling fix.
 
-  What the runs showed:
+  `trimmed` after the minimum-window rule (DECISIONS 2026-10-15, same clips, turbo): A 48 partials, lag 382 ms, `final_ms` 1209 ms, WER 5.0 % (before: 290 ms, 536 ms, 8.3 %); B 45 partials, 392 ms, 1557 ms, 0.0 % (before: 368 ms, 476 ms, 5.8 %). The "Thank you." is gone.
+
+  What the runs showed (before that rule):
   - `chunked` 500 ms triggered a Whisper repetition loop ("I'm sorry" dozens of times in one chunk) on clip A; Whisper tokens are not capped by audio length in `WhisperASR._run`. Even 2000 ms garbles words at the cuts.
   - `redecode` is as accurate as batch, but `final_ms` grows with the turn (about 2x a decode: the flush feed plus the final decode; 1.6-2.2 s on turbo, 7.5 s on large-v3 for 30 s).
   - `trimmed` on turbo keeps `final_ms` near 0.5 s on a 30 s turn and the lag below `redecode`'s, for 4-5 WER points more. The final decode on the short window left after the last cut once hallucinated "Thank you."
