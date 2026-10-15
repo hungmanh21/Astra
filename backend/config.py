@@ -47,7 +47,7 @@ class StreamingSettings:
     default_strategy: str = "redecode"  # for models without native streaming
     partial_interval_ms: int = 500  # least new audio between two partial decodes
     partial_min_audio_ms: int = 1000  # no partial before this much audio
-    chunk_ms: int = 500  # chunk length for the `chunked` strategy
+    chunk_ms: int = 2000  # chunk length for the `chunked` strategy
 
 
 @dataclass(frozen=True)

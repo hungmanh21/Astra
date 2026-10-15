@@ -177,7 +177,7 @@ STREAMING = """
     default_strategy: chunked
     partial_interval_ms: 250
     partial_min_audio_ms: 800
-    chunk_ms: 2000
+    chunk_ms: 1500
 """
 
 
@@ -191,7 +191,7 @@ def test_streaming_defaults_when_the_section_is_missing(tmp_path):
     assert s.asr_streaming.default_strategy == "redecode"
     assert s.asr_streaming.partial_interval_ms == 500
     assert s.asr_streaming.partial_min_audio_ms == 1000
-    assert s.asr_streaming.chunk_ms == 500
+    assert s.asr_streaming.chunk_ms == 2000
 
 
 def test_streaming_section_overrides_every_value(tmp_path):
@@ -200,7 +200,7 @@ def test_streaming_section_overrides_every_value(tmp_path):
         default_strategy="chunked",
         partial_interval_ms=250,
         partial_min_audio_ms=800,
-        chunk_ms=2000,
+        chunk_ms=1500,
     )
 
 

@@ -157,7 +157,7 @@ asr:
     default_strategy: redecode # for models without native streaming
     partial_interval_ms: 500   # least new audio between two partial decodes (redecode, trimmed)
     partial_min_audio_ms: 1000 # no partial before this much audio (Whisper invents text on tiny clips)
-    chunk_ms: 500              # chunk length for the `chunked` strategy
+    chunk_ms: 2000             # chunk length for the `chunked` strategy (S2.7: 500 and 1000 garble Whisper)
   models:
     nemotron-3.5-asr-streaming-0.6b:
       adapter: backend.asr.nemotron.NemotronASR
@@ -217,6 +217,6 @@ See [PLAN_v1.md](PLAN_v1.md):
 - [ ] Nemotron checkpoint and license (carried over from SPEC_v0 section 10): does `nvidia/nemotron-3.5-asr-streaming-0.6b` download, and does its license fit? Fallback: `nvidia/nemotron-speech-streaming-en-0.6b`. Settled in S4.
 - [ ] Python version vs NeMo (carried over): does NeMo run on 3.13? Settled in S4.
 - [ ] Which chunk sizes the Nemotron checkpoint supports, and which one to default to. Settled in S4.
-- [ ] Whether `whisper-large-v3` `redecode` is fast enough to be useful on the RTX 3060, or whether `trimmed` or turbo should be its recommended setup. Settled in S2.
-- [ ] Which `chunk_ms` makes `chunked` usable at all (500 ms is likely too short for Whisper; try 500, 1000 and 2000). Settled in S2.
-- [ ] Default strategy for models without native streaming (`redecode` until the S2 numbers say otherwise). Settled in S2.
+- [x] Whether `whisper-large-v3` `redecode` is fast enough to be useful on the RTX 3060, or whether `trimmed` or turbo should be its recommended setup. **No: recommend `whisper-large-v3-turbo` for live partials.** On a 30 s turn large-v3 `redecode` has a `final_ms` of about 7.5 s and a median lag of 1.0-1.2 s, and `trimmed` on large-v3 drops or repeats sentences (DECISIONS 2026-10-15). large-v3 stays available for accuracy (its batch WER is 1.4-1.7 %).
+- [x] Which `chunk_ms` makes `chunked` usable at all. **2000** (WER 13.3 % on a 29.6 s clip; 1000 gives 30.0 %, 500 gives a repetition loop and 445 %). Even 2000 is far behind `redecode` (3.3 %).
+- [x] Default strategy for models without native streaming: **`redecode`**. Its final transcript equals the batch one (WER 3.3 % and 1.4 % against batch 3.3 % and 1.4 %); `trimmed` has a much lower `final_ms` (about 0.5 s against 1.6-2.2 s) but costs 4-5 WER points on turbo.

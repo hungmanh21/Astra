@@ -14,10 +14,10 @@ How to read this: milestones S0-S5 match SPEC_v1 section 9. Task ids start with 
 
 | Decision | Made in | Notes |
 |----------|---------|-------|
-| `partial_interval_ms`, `partial_min_audio_ms` defaults | S2.7 | Starting values 500 / 1000; tune from `compare_asr.py --stream` numbers. |
-| `chunk_ms` for `chunked` | S2.7 | Try 500, 1000, 2000. |
-| Default strategy for batch models | S2.7 | `redecode` until the numbers say otherwise. |
-| Are `whisper-large-v3` partials usable on the RTX 3060? | S2.7 | Or recommend `trimmed` or turbo for it. |
+| `partial_interval_ms`, `partial_min_audio_ms` defaults | S2.7 | **Kept 500 / 1000** (sweep in the Notes). |
+| `chunk_ms` for `chunked` | S2.7 | **2000.** |
+| Default strategy for batch models | S2.7 | **`redecode`.** |
+| Are `whisper-large-v3` partials usable on the RTX 3060? | S2.7 | **No for live use; recommend turbo.** See DECISIONS 2026-10-15. |
 | Python version vs NeMo | S4.2 | Carried over from v0 T0.1. |
 | Nemotron checkpoint (3.5 vs fallback), license | S4.3 | Carried over from v0 T0.3. |
 | Nemotron chunk size | S4.3 | Latency vs accuracy; a config option. |
@@ -75,7 +75,7 @@ Goal: real partials from the Whisper models we already have, in three ways that 
   Done when: on the fixture, the segments' text joined equals the plain transcript (apart from spacing), the timestamps increase and lie inside the clip, and a prompt run still gives sensible text (checked with `compare_asr.py`; the adapter's unit test uses a stubbed pipeline).
 - [x] **S2.6 `trimmed` (`TrimmedStream`).** Like `redecode`, but it decodes only the audio after the trim point, prompted with the committed text. It moves the trim point to the end of a committed segment that ends a sentence (SPEC_v1 6.4). `finish` decodes only the tail and returns committed + tail.
   Done when: tests with a scripted fake segmented model show the trim point moving only on a committed sentence end, the decoded audio getting shorter after a trim, the prompt carrying the committed text, and committed text never shrinking across a trim; `compare_asr.py --stream --strategy trimmed` on the fixture is in the Notes.
-- [ ] **S2.7 Compare, tune and decide.** Run `compare_asr.py --stream --strategy all` on the fixture for both Whisper models (and on a longer clip near 30 s if one is at hand, where `trimmed` should pull ahead). Set the `partial_interval_ms`, `partial_min_audio_ms`, `chunk_ms` and default-strategy values, and decide what to recommend for large-v3. Close those questions in SPEC_v1 section 10.
+- [x] **S2.7 Compare, tune and decide.** Run `compare_asr.py --stream --strategy all` on the fixture for both Whisper models (and on a longer clip near 30 s if one is at hand, where `trimmed` should pull ahead). Set the `partial_interval_ms`, `partial_min_audio_ms`, `chunk_ms` and default-strategy values, and decide what to recommend for large-v3. Close those questions in SPEC_v1 section 10.
   Done when: the comparison table is in the Notes, the defaults are in `config.yaml`, and there is a DECISIONS entry with the numbers behind them.
 
 ---
@@ -177,5 +177,36 @@ Goal: native streaming. Mind the slow PyPI downloads (PROGRESS Known Issues).
 
   `trimmed` pays off where it should: `final_ms` stays under 0.6 s instead of growing with the turn, and the lag is lower than `redecode`'s. The price is accuracy: sentence 2 and 3 get extra "Ithaca." repeats at their ends and a few punctuation changes, so the WER doubles. A 200 ms margin on the cut did not change it, so it is not the timestamps; the likely cause is that this clip repeats one sentence, which makes the prompt (the sentence just settled) the next thing Whisper "expects". S2.7 must repeat this on a clip with different sentences before judging `trimmed` on accuracy.
 - **Found by the long run (S2.6):** the first version built the settled text from the current decode's spelling, so a cut could turn "doubts," into "doubts" after it was shown (the FR-16 check in `compare_asr.py` flagged it). The settled text now uses the committed words as they were shown; `test_the_settled_text_keeps_the_spelling_the_user_already_saw` covers it.
-- **Strategy results (S2.7):** _to fill in._
+- **Strategy results (S2.7),** `compare_asr.py --stream`, interval 500 ms unless noted, 2026-10-15. Two scratch clips, not committed, joined from the LibriSpeech dummy set (`hf-internal-testing/librispeech_asr_dummy`) with 0.2 s gaps and their reference text: **A** = utterances 1272-128104-0005..0008 (29.6 s, 60 words), **B** = 1272-135031-0000, -0001, -0003 (27.2 s).
+
+  | model | clip | strategy | partials | median lag | `final_ms` | WER |
+  |---|---|---|---|---|---|---|
+  | turbo | A | batch | - | - | 782 ms | 3.3 % |
+  | turbo | A | `chunked` 500 | 50 | 196 ms | 440 ms | 445 % |
+  | turbo | A | `chunked` 1000 | 29 | 198 ms | 198 ms | 30.0 % |
+  | turbo | A | `chunked` 2000 | 14 | 248 ms | 184 ms | 13.3 % |
+  | turbo | A | `redecode` | 45 | 433 ms | 2229 ms | 3.3 % |
+  | turbo | A | `trimmed` | 57 | 290 ms | 536 ms | 8.3 % |
+  | turbo | B | batch | - | - | 860 ms | 1.4 % |
+  | turbo | B | `chunked` 500 | 45 | 194 ms | 331 ms | 78.3 % |
+  | turbo | B | `redecode` | 41 | 480 ms | 1803 ms | 1.4 % |
+  | turbo | B | `trimmed` | 35 | 368 ms | 476 ms | 5.8 % |
+  | large-v3 | A | batch | - | - | 2887 ms | 1.7 % |
+  | large-v3 | A | `chunked` 500 | 58 | 390 ms | 934 ms | 90.0 % |
+  | large-v3 | A | `redecode` | 22 | 1024 ms | 7588 ms | 1.7 % |
+  | large-v3 | A | `trimmed` | 33 | 844 ms | 16970 ms | 21.7 % |
+  | large-v3 | A | `trimmed`, second run | 19 | 1463 ms | 4537 ms | 3.3 % (lower case, never cut) |
+  | large-v3 | B | batch | - | - | 3543 ms | 1.4 % |
+  | large-v3 | B | `chunked` 500 | 53 | 386 ms | 639 ms | 82.6 % |
+  | large-v3 | B | `redecode` | 17 | 1196 ms | 7499 ms | 1.4 % |
+  | large-v3 | B | `trimmed` | 25 | 894 ms | 2646 ms | 26.1 % |
+
+  Interval sweep, turbo `redecode`, clip A: 250 ms gives 60 partials, lag 374 ms, `final_ms` 1672; 500 ms 45, 433 ms, 2229; 1000 ms 28, 453 ms, 1623 (WER 3.3 % each). `trimmed` at 1000 ms: 29 partials, 370 ms, 454 ms, 8.3 %. No FR-16 violation (committed text always extends) in any run after the S2.6 spelling fix.
+
+  What the runs showed:
+  - `chunked` 500 ms triggered a Whisper repetition loop ("I'm sorry" dozens of times in one chunk) on clip A; Whisper tokens are not capped by audio length in `WhisperASR._run`. Even 2000 ms garbles words at the cuts.
+  - `redecode` is as accurate as batch, but `final_ms` grows with the turn (about 2x a decode: the flush feed plus the final decode; 1.6-2.2 s on turbo, 7.5 s on large-v3 for 30 s).
+  - `trimmed` on turbo keeps `final_ms` near 0.5 s on a 30 s turn and the lag below `redecode`'s, for 4-5 WER points more. The final decode on the short window left after the last cut once hallucinated "Thank you."
+  - `trimmed` on large-v3: timestamped text sometimes loses its punctuation (then it never cuts and the lag grows); with a prompt it dropped a sentence ("On the general principles of art ...") on A and repeated the last sentence on B. The 17 s `final_ms` did not reproduce on a rerun.
+  - Whisper does emit "..." mid-sentence on natural speech ("Painting, he tells us, is... of a different quality"), so the no-cut-after-ellipsis rule was needed.
 - **Testing:** real model weights stay out of pytest, as in v0. A test that needs NeMo or the weights is skipped when they are missing.
