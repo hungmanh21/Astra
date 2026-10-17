@@ -1,13 +1,21 @@
 # Project Progress
 
 ## Current State
-- Latest commit: e82c015 Test the streaming turn log and edge cases over a real WebSocket (S1.7, S1.8)
-- Test status: 356 pytest tests passing (audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
+- Latest commit: 1f1a0a6 Show live partials, the strategy dropdown and streaming timings in the UI (S3.1-S3.3)
+- Test status: 573 pytest tests passing (TrimmedStream and trim_point with a scripted segmented model, Whisper segments with a stubbed pipeline, agreement, bench, chunked and redecode streams, audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
 - Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]`, `pyyaml`, `pydantic`, `python-dotenv` (plus the original audio libs); dev: `pytest`, `ruff`, `httpx`
 
 ## Completed
+- [x] v1 S3.1-S3.3: the UI shows `partial` text in the user's bubble (committed normal, tentative dimmed; stale partials ignored; the transcript replaces it), a "Streaming" dropdown next to the model (per-model choice remembered, sent as `stream_strategy`), and strategy / partial count / lag / `final_ms` in the timings line. Checked with a throwaway Node harness (17 checks) and against the real server; written entirely by Claude
+- [x] S2 follow-ups: `ASRStream.finish(audio)` takes the last samples, so `redecode` and `trimmed` decode once at the end (turbo 30 s `final_ms`: `redecode` 2229 -> 1217 ms and 1803 -> 1469, `trimmed` 1209 -> 691 and 1557 -> 892); Whisper's `max_new_tokens` is capped by the audio length (stops repetition loops); `BatchStream` deleted; `trimmed` keeps at least `partial_min_audio_ms` of audio after a cut. DECISIONS 2026-10-15
+- [x] v1 S2.7: compared all strategies on two natural ~30 s clips and the fixture (numbers in PLAN_v1 Notes); `chunk_ms` is now 2000, the other defaults stay (`redecode`, 500 ms, 1000 ms); DECISIONS 2026-10-15 and SPEC_v1 section 10 record the answers. Recommendation: turbo for live partials, large-v3 for accuracy only. S2 is done
+- [x] v1 S2.6: `TrimmedStream` and `trim_point` in `strategies.py` (re-decodes only the window after the last cut, prompted with the settled text; cuts after a committed segment that ends a sentence; `finish` decodes only the window), wired into the service. `trim_point` written by you (I fixed it to return the largest k), the stream by Claude. A 29.7 s clip (fixture x3) on turbo: lag 348 ms, `final_ms` 519 ms (redecode 2231 ms), but WER 8.3 % against 4.2 %
+- [x] v1 S2.5: `WhisperASR.transcribe_segments(audio, sample_rate, prompt)` and `segments_from_chunks` in `whisper.py`; Whisper is now a `SegmentedASRModel`, so the `session` message lists `trimmed` for it (it runs as a batch decode until S2.6). `compare_asr.py --segments` checks it on the real models
+- [x] v1 S2.4: `RedecodeStream` in `strategies.py` (re-decodes the whole turn on each feed past `partial_min_audio_ms`, splits with `local_agreement`, `finish` is one plain decode), wired into the service. Real runs on the fixture are in PLAN_v1 Notes: final text equals batch on both Whisper models, lag grows with the turn, `final_ms` is about twice a full decode
+- [x] v1 S2.3: `backend/asr/agreement.py`, `local_agreement(committed, previous, current)` (longest common word prefix of two decodes ignoring case and punctuation; committed words never change). Tests by Claude, implementation by Claude
+- [x] v1 S2.1 and S2.2: `backend/asr/bench.py` (`replay` at real-time pace through the real `StreamingTranscription`, word error rate, summary table) behind `compare_asr.py --stream [--strategy] [--interval-ms] [--chunk-ms]`; `ChunkedStream` in `strategies.py`, wired into the service. Real runs on the fixture (turbo, large-v3) are in PLAN_v1 Notes: `chunked` gets WER 16.7-71 % depending on `chunk_ms` against 4.2 % batch. The remainder is now always decoded (DECISIONS 2026-10-14); on the fixture's trailing silence that adds "Yeah." / "Thank you."
 - [x] v1 S1.1-S1.3: streaming types in `backend/asr/base.py` (`PartialResult`, `ASRStream`, `StreamingASRModel`, `Segment`, `SegmentedASRModel`, strategy constants), `asr.streaming` config with validation (`StreamingSettings`), protocol: `partial` message, `stream_strategy` on `start_turn`/`transcript`/`timings`, `stream_strategies` on `session`. `tests/fakes.py` has the fake streaming and segmented adapters. Written by you, tests and stubs by Claude
 - [x] v1 S0.1: v0 docs renamed to `SPEC_v0.md` / `PLAN_v0.md`; `SPEC_v1.md` and `PLAN_v1.md` written and approved (live partials while recording; strategies `chunked`, `redecode`, `trimmed`, `native` chosen per turn and compared on latency and WER; Whisper first, Nemotron in S4); CLAUDE.md, README and DECISIONS updated. Branch `v1` pushed to origin
 - [x] Pre-PR review of v0 and fixes: review mode no longer pre-fills a blank transcript with "(no speech detected)"; a review turn that fails (disconnect or error) loses its Send/Discard, so stale buttons cannot confirm or discard the next turn; `/ws` refuses a cross-origin browser (HTTP 403) and the UI's `?ws=` override is gone; the `session` message carries `max_turn_seconds` and the UI auto-stops there (SPEC 6.3 updated); a turn is never logged twice when the client leaves while an error is being sent; blank `LLM_MODEL` / `LLM_API_BASE` in `.env` fall back to `config.yaml`. Frontend fixes checked with a throwaway Node harness (fails on the old code, passes on the new); origin check also tried against the real server
@@ -33,10 +41,14 @@
 - [x] Worklet and recorder logic checked with stubbed Node tests (resampling at 48k/44.1k/16k, 30 s cap, stale-message handling)
 
 ## In Progress
-- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 40%: S0.1, S0.2, S1.1-S1.8 done (the streaming seam is complete and tested end to end with fakes; every stream is still a `BatchStream` placeholder) (baseline: large-v3 1499 ms, turbo 385 ms on the 9.9 s fixture, in PLAN_v1 Notes). Turn log already carries the four streaming timing fields (via `Timings.model_dump`), so S1.7 only lacks its test
+- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 70%: S0.1, S0.2, S1.1-S1.8, S2.1-S2.7, S3.1-S3.3 done (`chunked`, `redecode` and `trimmed` are real; `BatchStream` is no longer used by the service) (baseline: large-v3 1499 ms, turbo 385 ms on the 9.9 s fixture, in PLAN_v1 Notes).
 - [~] v0 follow-ups not in v1: real vLLM server test (PLAN_v0 T5.4). NeMo adapters and the M0 questions moved into PLAN_v1 S4
 
 ## Known Issues
+- `trimmed` on `whisper-large-v3` is unreliable: timestamped text sometimes loses punctuation (then it never cuts and the lag grows) and, with a prompt, it dropped a sentence on one clip and repeated the last sentence on another. Not recommended; turbo is the live setup
+- `trimmed` on turbo: WER 5.0 % and 0.0 % on the two long clips (`redecode` 3.3 % and 1.4 %), `final_ms` 0.7-0.9 s (`redecode` 1.2-1.5 s). Still opt-in; on `whisper-large-v3` it stays unreliable
+- `chunked` decodes a trailing-silence remainder and Whisper invents text ("Yeah.", "Thank you."); left as is, a client-side VAD later should send only chunks with real sound (DECISIONS 2026-10-14)
+- In the bench, streaming `final_ms` is about 200 ms above the batch `asr_ms` on turbo even for a plain batch decode; cause not found (GPU idle during the replay is a guess)
 - A cold model now loads at `start_turn`, before the ack (v1 design, see DECISIONS 2026-10-13); preload or a UI hint is needed in S3
 - `tests/test_asr_base.py::test_fake_stream_can_fail_and_block` failed once in a full run (WSL2 `Event.wait(timeout)` returning early); passes on rerun
 - Review-mode frontend fixes (blank transcript, stale buttons after a failed turn) not yet re-checked in Chrome
@@ -54,5 +66,4 @@
 - Whisper may emit text such as "Thank you." on silence or noise; not handled in v0, note what you see in M2
 
 ## Next Steps
-1. S2 in plan order: S2.1 `compare_asr.py --stream` first (so every strategy is measured the moment it exists), S2.2 `ChunkedStream`, S2.3 LocalAgreement-2 (`backend/asr/agreement.py`), S2.4 `RedecodeStream`, S2.5 `transcribe_segments` on `WhisperASR`, S2.6 `TrimmedStream`, S2.7 compare and tune. Each replaces `BatchStream` for its strategy in the service
-2. S3 UI partials (strategy dropdown, dimmed tentative text), then S4 NeMo and Nemotron, S5 measurements
+1. S3.4 Chrome check by hand (needs the microphone): turbo and large-v3 with `chunked`, `redecode` and `trimmed`, review mode off and on, and a 30 s auto-stop. Then S4 NeMo and Nemotron, S5 measurements

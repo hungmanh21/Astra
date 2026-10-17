@@ -18,7 +18,7 @@ How to read this: milestones S0-S5 match SPEC_v1 section 9. Task ids start with 
 | `chunk_ms` for `chunked` | S2.7 | **2000.** |
 | Default strategy for batch models | S2.7 | **`redecode`.** |
 | Are `whisper-large-v3` partials usable on the RTX 3060? | S2.7 | **No for live use; recommend turbo.** See DECISIONS 2026-10-15. |
-| Python version vs NeMo | S4.2 | Carried over from v0 T0.1. |
+| Python version vs NeMo | S4.2 (settled: stays 3.13) | Carried over from v0 T0.1. |
 | Nemotron checkpoint (3.5 vs fallback), license | S4.3 | Carried over from v0 T0.3. |
 | Nemotron chunk size | S4.3 | Latency vs accuracy; a config option. |
 | Which models stay resident on 12 GB | S4.6 | No eviction logic in v0. Ask before adding any. |
@@ -90,7 +90,7 @@ Goal: the live text in the browser.
   Done when: the line shows them when they are present and skips them when null.
 - [x] **S3.3 Strategy dropdown.** Next to the model dropdown, list the selected model's strategies from the `session` message, preselect its default, remember the choice per model (like the model choice), and send it with every `start_turn` (FR-22). Disabled while a turn is in flight.
   Done when: the Node harness shows the list changing with the model, the default chosen, and the choice sent in `start_turn`.
-- [ ] **S3.4 Chrome check.** Use `whisper-large-v3-turbo` and `whisper-large-v3`, each with `chunked`, `redecode` and `trimmed`, with review mode off and on, plus a turn that hits the 30 s auto-stop.
+- [x] **S3.4 Chrome check.** Use `whisper-large-v3-turbo` and `whisper-large-v3`, each with `chunked`, `redecode` and `trimmed`, with review mode off and on, plus a turn that hits the 30 s auto-stop.
   Done when: you have seen words appear while speaking with every strategy, committed text never jumping back, and the final transcript and reply as before.
 
 ---
@@ -99,9 +99,9 @@ Goal: the live text in the browser.
 
 Goal: native streaming. Mind the slow PyPI downloads (PROGRESS Known Issues).
 
-- [ ] **S4.1 Move the venv off `/mnt/d` (recommended first).** Set `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/astra` (about 65x faster for small files), re-sync, and note it in the README.
+- [x] **S4.1 Move the venv off `/mnt/d` (recommended first).** Set `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/astra` (about 65x faster for small files), re-sync, and note it in the README.
   Done when: `make check` passes from the new env and the README says how to set it.
-- [ ] **S4.2 Install NeMo and settle the Python version.** (v0 T0.1, T0.2, T0.4.) Add NeMo with the ASR extras. If it does not support 3.13, lower `.python-version` and `requires-python`. If its pins clash with the rest, decide on the worker-subprocess fallback (SPEC_v0 6.7) and ask before building it.
+- [x] **S4.2 Install NeMo and settle the Python version.** (v0 T0.1, T0.2, T0.4.) Add NeMo with the ASR extras. If it does not support 3.13, lower `.python-version` and `requires-python`. If its pins clash with the rest, decide on the worker-subprocess fallback (SPEC_v0 6.7) and ask before building it.
   Done when: `uv sync` succeeds, one process imports `nemo.collections.asr`, transformers and litellm, `torch.cuda.is_available()` is True, `make check` passes, and the Python version is in DECISIONS.
 - [ ] **S4.3 Nemotron spike.** (v0 T0.3.) In a throwaway script, download the checkpoint (3.5, else the fallback), check the license, transcribe the fixture in batch, and run NeMo's cache-aware streaming loop over it with each supported chunk size. Note text, time per chunk and GPU memory.
   Done when: SPEC_v1 section 10 questions 1-3 are closed (checkpoint, license, Python version, chunk sizes and default), with DECISIONS entries.
@@ -213,5 +213,5 @@ Goal: native streaming. Mind the slow PyPI downloads (PROGRESS Known Issues).
   - `trimmed` on turbo keeps `final_ms` near 0.5 s on a 30 s turn and the lag below `redecode`'s, for 4-5 WER points more. The final decode on the short window left after the last cut once hallucinated "Thank you."
   - `trimmed` on large-v3: timestamped text sometimes loses its punctuation (then it never cuts and the lag grows); with a prompt it dropped a sentence ("On the general principles of art ...") on A and repeated the last sentence on B. The 17 s `final_ms` did not reproduce on a rerun.
   - Whisper does emit "..." mid-sentence on natural speech ("Painting, he tells us, is... of a different quality"), so the no-cut-after-ellipsis rule was needed.
-- **UI (S3.1-S3.3),** checked with a throwaway Node harness (fake DOM, the real `app.js`, scripted server messages; kept out of the repo like the v0 one): 17 checks pass. They cover the strategy list following the model and its default, the choice remembered per model and sent in `start_turn`, both dropdowns disabled while a turn runs, committed text normal and tentative text dimmed (`<span class="committed">` / `<span class="tentative">`), a partial for another turn or before `turn_started` or after `transcript` ignored, "Transcribing…" not replacing a shown partial, the transcript replacing the partials, review mode starting from the final transcript, markup shown as text, the timings line with strategy / partial count / lag / `final_ms` (null skipped, a zero count shown), and an older server without `stream_strategies`. Four deliberate bugs in `app.js` were each caught. Against the real server (turbo, `trimmed`, the fixture): the page serves the dropdown, `session` lists the strategies, 17 `partial` messages arrive with the expected keys and turn id, and the transcript carries `stream_strategy: trimmed`. **S3.4 (the Chrome check with a microphone) is still open.**
+- **UI (S3.1-S3.3),** checked with a throwaway Node harness (fake DOM, the real `app.js`, scripted server messages; kept out of the repo like the v0 one): 17 checks pass. They cover the strategy list following the model and its default, the choice remembered per model and sent in `start_turn`, both dropdowns disabled while a turn runs, committed text normal and tentative text dimmed (`<span class="committed">` / `<span class="tentative">`), a partial for another turn or before `turn_started` or after `transcript` ignored, "Transcribing…" not replacing a shown partial, the transcript replacing the partials, review mode starting from the final transcript, markup shown as text, the timings line with strategy / partial count / lag / `final_ms` (null skipped, a zero count shown), and an older server without `stream_strategies`. Four deliberate bugs in `app.js` were each caught. Against the real server (turbo, `trimmed`, the fixture): the page serves the dropdown, `session` lists the strategies, 17 `partial` messages arrive with the expected keys and turn id, and the transcript carries `stream_strategy: trimmed`. S3.4 (the Chrome check with a microphone) was done by hand and passed.
 - **Testing:** real model weights stay out of pytest, as in v0. A test that needs NeMo or the weights is skipped when they are missing.

@@ -32,6 +32,16 @@ cp .env.example .env     # then put your GEMINI_API_KEY in .env
 
 `.env` holds secrets and is git-ignored. `config.yaml` holds model names and defaults.
 
+**WSL2: keep the venv off `/mnt/d`.** Installing thousands of small files on a Windows drive is
+very slow. The Makefile sets `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/astra`, so `make` targets use
+a venv on the Linux filesystem. For plain `uv` commands, export it once in your shell profile:
+
+```bash
+export UV_PROJECT_ENVIRONMENT=$HOME/.venvs/astra
+```
+
+Then `uv sync` and `uv run` use the same env. (`rm -rf .venv` once the new env works.)
+
 ## Run
 
 ```bash

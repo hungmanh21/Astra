@@ -136,3 +136,8 @@
 - Rejected alternative (finish): skipping the flush feed when nothing is in flight cannot work, because `StreamingTranscription` does not know whether the stream decodes on every feed.
 - Risk (cap): a very fast speaker (over 12 tokens per second sustained) would be cut off. English speech is 4-8, and the clip is capped at 30 s.
 
+
+## 2026-10-17: NeMo installs in the same env on Python 3.13; the venv lives off `/mnt/d`
+- Reason: `nemo-toolkit[asr]` 3.0.0 resolves on Python 3.13 without touching torch (2.14.0+cu130) or transformers (5.17.0); only `fsspec` and `packaging` step back a little. One process imports `nemo.collections.asr`, transformers and litellm, and CUDA is available. So `.python-version` stays 3.13 and the worker-subprocess fallback (SPEC_v0 6.7) is not needed.
+- Reason (venv): the Makefile sets `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/astra` by default. A venv on `/mnt/d` (WSL2 9p mount) is dozens of times slower for thousands of small files. Plain `uv` commands need the same variable exported (README).
+- Cost: 70 more packages (wandb, tensorboard, lhotse, lightning...), imported only when the Nemotron adapter loads. NeMo prints some OneLogger telemetry notices at import; telemetry is disabled.
