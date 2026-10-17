@@ -1,6 +1,6 @@
 # Voice Agent v1: Live Partial Transcripts
 
-**Status:** Approved, in progress
+**Status:** Implemented; two Chrome checks left (PLAN_v1 S5.2)
 **Author:** hhm
 **Last updated:** 2026-10-04
 **Builds on:** [SPEC_v0.md](SPEC_v0.md). Everything in v0 still holds unless this document changes it. v0 requirements keep their numbers (FR-1 to FR-14); new ones start at FR-15.
@@ -195,13 +195,13 @@ scripts/compare_asr.py  # + --stream [--strategy ...]: real-time feed of a WAV, 
 
 ## 8. Acceptance Criteria
 
-- [ ] Holding the button with `whisper-large-v3-turbo`, I see my words appear while speaking. Committed text never changes. Release gives the final transcript and the reply as in v0.
-- [ ] The same works on `whisper-large-v3` (partials may lag more) and on Nemotron, with no session code that names a model.
-- [ ] I can pick the strategy in the UI. Each Whisper model runs `chunked`, `redecode` and `trimmed`, and Nemotron runs `native`, with no restart.
-- [ ] A partial decode failure (forced in a test) leaves the turn working with a final transcript and no user-facing error.
-- [ ] `compare_asr.py --stream` on the fixture prints, per model and strategy, the partial timeline, `partial_lag_ms`, `final_ms`, the final transcript and its WER against the reference. Every combination returns non-empty text.
-- [ ] `llm_done.timings` and the turn log carry `stream_strategy`, `partial_count`, `partial_lag_ms` and `final_ms`. A comparison table (model × strategy: latency and WER) is recorded (PLAN_v1 S5).
-- [ ] All v0 tests still pass. Review mode, the 30 s cap and failure handling behave as in v0.
+- [x] Holding the button with `whisper-large-v3-turbo`, I see my words appear while speaking. Committed text never changes. Release gives the final transcript and the reply as in v0. *(Checked in Chrome, S3.4: turbo and large-v3 with `chunked`, `redecode` and `trimmed`, review mode off and on, and the 30 s auto-stop.)*
+- [x] The same works on `whisper-large-v3` (partials may lag more) and on Nemotron, with no session code that names a model. *(large-v3 in S3.4; Nemotron tried in Chrome after S4.4: fast, text decent. `session.py`, `protocol.py`, `streaming.py` and `service.py` name no model; only comments in `strategies.py` mention Whisper.)*
+- [ ] I can pick the strategy in the UI. Each Whisper model runs `chunked`, `redecode` and `trimmed`, and Nemotron runs `native`, with no restart. *(Follow-up: the Whisper strategies and Nemotron were each tried in Chrome; switching between models and strategies in one server run is part of the S5.2 check. The `session` message lists the right strategies per model, checked on a clean clone.)*
+- [x] A partial decode failure (forced in a test) leaves the turn working with a final transcript and no user-facing error. *(`test_a_failing_partial_decode_does_not_break_the_turn` and the streaming tests; with `native` a failed chunk ends the model's stream, so that turn gets an ASR error, see Known Issues.)*
+- [x] `compare_asr.py --stream` on the fixture prints, per model and strategy, the partial timeline, `partial_lag_ms`, `final_ms`, the final transcript and its WER against the reference. Every combination returns non-empty text. *(S5.1: 3 models x 3-4 strategies on four clips, all non-empty.)*
+- [x] `llm_done.timings` and the turn log carry `stream_strategy`, `partial_count`, `partial_lag_ms` and `final_ms`. A comparison table (model × strategy: latency and WER) is recorded (PLAN_v1 S5).
+- [x] All v0 tests still pass. Review mode, the 30 s cap and failure handling behave as in v0. *(618 tests pass; review mode and the 30 s cap were checked in Chrome in S3.4. Follow-up: a forced LLM failure in Chrome is part of S5.2.)*
 
 ### Measured comparison (PLAN_v1 S5.1)
 
