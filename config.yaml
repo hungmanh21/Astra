@@ -24,6 +24,17 @@ asr:
         device: auto
         dtype: float16
 
+    # Streams natively (strategy `native`). lookahead_tokens sets the chunk: (n + 1) x 80 ms.
+    # English checkpoint: 0 (hangs in transformers), 1, 6 or 13. The multilingual
+    # nvidia/nemotron-3.5-asr-streaming-0.6b also works: 3, 6 or 13, and `language: en-US`.
+    nemotron-streaming-en-0.6b:
+      adapter: backend.asr.nemotron.NemotronASR
+      model_id: nvidia/nemotron-speech-streaming-en-0.6b
+      options:
+        device: auto
+        dtype: float32
+        lookahead_tokens: 6
+
 # Used from M3 on. LiteLLM model name; the key is GEMINI_API_KEY in .env.
 llm:
   model: gemini/gemini-3.5-flash-lite

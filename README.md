@@ -113,8 +113,9 @@ One adapter file plus one config entry. Write a class in `backend/asr/` that fol
 `asr.models` in `config.yaml` with its `adapter` path, `model_id` and `options`. The session code
 never special-cases a model.
 
-Available today: `whisper-large-v3` and `whisper-large-v3-turbo`. Parakeet and Nemotron adapters (NeMo) are planned but not
-written yet.
+Available today: `whisper-large-v3`, `whisper-large-v3-turbo` and `nemotron-streaming-en-0.6b` (NVIDIA's cache-aware
+streaming model, run through `transformers`; the only one with the `native` streaming strategy, about 2.6 GB on the GPU).
+A Parakeet adapter is planned.
 
 ## Compare ASR models on a clip
 
