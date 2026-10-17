@@ -147,7 +147,7 @@ class SegmentedASRModel(ASRModel, Protocol):  # optional capability: the `trimme
 - **`RedecodeStream`** (any `ASRModel`): it keeps the whole turn's audio. A `feed` re-transcribes everything once at least `partial_min_audio_ms` of audio exists. Committed text uses **LocalAgreement-2**: the words two decodes in a row agree on, from the start of the text, beyond what is already committed. The rest of the latest decode is tentative. `finish` runs one full decode, so the final transcript equals v0's.
 - **`TrimmedStream`** (`SegmentedASRModel`): like `RedecodeStream`, but it only decodes the audio after the last trim point, and passes the committed text as the prompt. When the committed text covers a whole segment that ends in sentence punctuation, the audio up to that segment's end is dropped and the trim point moves. A cut must leave at least `partial_min_audio_ms` of audio in the window (an earlier sentence end is used if the last one is too late), because Whisper invents text such as "Thank you." on a window of about a second or less; a trailing-off "..." is never a sentence end. Decodes stay short however long the turn gets. `finish` decodes only the remaining tail and returns committed text plus the tail (this approach comes from the `whisper_streaming` project).
 - **Coalescing (FR-20):** each turn has one `StreamingTranscription` with a pending-audio buffer and at most one decode in flight. When a decode returns and at least `partial_interval_ms` of new audio is pending, all of it goes into the next `feed`. `end_turn` waits for the decode in flight, feeds the remainder, then calls `finish`.
-- **Native streaming (Nemotron):** the adapter buffers fed audio into the model's chunk size and runs NeMo's cache-aware streaming step for each full chunk. It returns the hypothesis so far as committed (RNNT output for processed chunks does not change), with no tentative text. `finish` pads and flushes the last chunk. The chunk size (latency vs accuracy) is a config option.
+- **Native streaming (Nemotron):** the adapter runs the checkpoint through 🤗 Transformers (`AutoModelForRNNT`, cache-aware streaming `generate()`), not NeMo (DECISIONS 2026-10-17). It buffers fed audio into the model's chunk size, feeds each full chunk once and reads the tokens decoded so far. Those tokens never change, so every complete word is committed; the last word may still be growing ("Sir Fred" before "Sir Frederick"), so it is the tentative text until a following word starts. `finish` pads the last chunk with silence, flushes it and commits everything. The chunk size (latency vs accuracy) is the `lookahead_tokens` config option, in 80 ms units. One stream (or batch decode) at a time per model: the model object holds the streaming state, so an overlapping call fails with an `ASRError`.
 - One ASR worker thread, as in v0. Partial decodes of one session can delay another session's decode. This is accepted for a single-user v1.
 
 ### 6.5 Config (extends SPEC_v0 6.2)
@@ -160,11 +160,11 @@ asr:
     partial_min_audio_ms: 1000 # no partial before this much audio (Whisper invents text on tiny clips)
     chunk_ms: 2000             # chunk length for the `chunked` strategy (S2.7: 500 and 1000 garble Whisper)
   models:
-    nemotron-3.5-asr-streaming-0.6b:
+    nemotron-streaming-en-0.6b:
       adapter: backend.asr.nemotron.NemotronASR
-      model_id: nvidia/nemotron-3.5-asr-streaming-0.6b   # or the fallback, see SPEC_v0 6.4
+      model_id: nvidia/nemotron-speech-streaming-en-0.6b   # also runs: nvidia/nemotron-3.5-asr-streaming-0.6b
       options:
-        chunk_ms: 560          # exact allowed values fixed in PLAN_v1 S4.3
+        lookahead_tokens: 6    # 0, 1, 6 or 13 (3.5: 0, 3, 6, 13); chunk = (n + 1) x 80 ms
 ```
 
 ### 6.6 Repository layout (additions)
@@ -191,7 +191,7 @@ scripts/compare_asr.py  # + --stream [--strategy ...]: real-time feed of a WAV, 
 | Partial format | Full committed + tentative text, not deltas | Turns are ≤ 30 s, so the text is short; easy to render; a lost or skipped partial costs nothing | Long-form audio (after v1) |
 | Final transcript | Separate `finish()`; replaces partials | Each strategy decides: `redecode` keeps v0 accuracy, the others trade some of it for a much faster final | — |
 | Turn control | Push-to-talk | Keeps VAD out of this step | v2 (VAD, hands-free) |
-| NeMo placement | In-process, same env (SPEC_v0 6.7 fallback still applies) | Least plumbing | NeMo pins clash with the env |
+| Nemotron backend | 🤗 Transformers, in-process, same env | Same loading as Whisper, no NeMo import, verified streaming in S4.3 | NeMo (installs on 3.13 but was not needed; SPEC_v0 6.7 fallback is moot) |
 
 ## 8. Acceptance Criteria
 
@@ -215,9 +215,9 @@ See [PLAN_v1.md](PLAN_v1.md):
 
 ## 10. Open Questions
 
-- [ ] Nemotron checkpoint and license (carried over from SPEC_v0 section 10): does `nvidia/nemotron-3.5-asr-streaming-0.6b` download, and does its license fit? Fallback: `nvidia/nemotron-speech-streaming-en-0.6b`. Settled in S4.
+- [x] Nemotron checkpoint and license (carried over from SPEC_v0 section 10). Both download without a token. `nvidia/nemotron-3.5-asr-streaming-0.6b` is multilingual (OpenMDW-1.1); `nvidia/nemotron-speech-streaming-en-0.6b` is English only (NVIDIA Open Model License). **Default: the English one** (exact fixture text, smaller lookahead; v1 is English only). Both fit a personal project. The 3.5 checkpoint runs with the same adapter (DECISIONS 2026-10-17).
 - [x] Python version vs NeMo (carried over): does NeMo run on 3.13? Yes: nemo-toolkit 3.0.0 resolves and imports on 3.13 next to transformers and litellm (S4.2, DECISIONS 2026-10-17).
-- [ ] Which chunk sizes the Nemotron checkpoint supports, and which one to default to. Settled in S4.
+- [x] Which chunk sizes the Nemotron checkpoint supports. English: lookahead 0, 1, 6, 13 (chunk 80 ms x (n + 1)); 3.5: 0, 3, 6, 13. 0 hangs in Transformers (its first chunk is 200 samples). Default `lookahead_tokens: 6` until S4.4 compares them on the clips.
 - [x] Whether `whisper-large-v3` `redecode` is fast enough to be useful on the RTX 3060, or whether `trimmed` or turbo should be its recommended setup. **No: recommend `whisper-large-v3-turbo` for live partials.** On a 30 s turn large-v3 `redecode` has a `final_ms` of about 7.5 s and a median lag of 1.0-1.2 s, and `trimmed` on large-v3 drops or repeats sentences (DECISIONS 2026-10-15). large-v3 stays available for accuracy (its batch WER is 1.4-1.7 %).
 - [x] Which `chunk_ms` makes `chunked` usable at all. **2000** (WER 13.3 % on a 29.6 s clip; 1000 gives 30.0 %, 500 gives a repetition loop and 445 %). Even 2000 is far behind `redecode` (3.3 %).
 - [x] Default strategy for models without native streaming: **`redecode`**. Its final transcript equals the batch one (WER 3.3 % and 1.4 % against batch 3.3 % and 1.4 %); `trimmed` has a lower `final_ms` (0.7-0.9 s against 1.2-1.5 s on a 30 s turn, after the `finish(audio)` change; it does not grow with the turn) and, with the minimum-window rule, a WER of 5.0 % and 0.0 % on turbo (against 3.3 % and 1.4 % for `redecode`).
