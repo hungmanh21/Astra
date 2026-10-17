@@ -466,7 +466,9 @@ async function enableMic() {
   try {
     await recorder.init();
     micReady = true;
-    addNotice(`Microphone ready (audio context at ${recorder.sampleRate} Hz).`);
+    addNotice(
+      `Microphone ready (audio context at ${recorder.sampleRate} Hz, keeps recording ${releaseTailMs} ms after release).`,
+    );
   } catch (err) {
     addNotice(`Microphone unavailable: ${err.message}`, "error");
   }

@@ -25,6 +25,19 @@ from backend.turnlog import configure_logging
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 
+class RevalidatedStaticFiles(StaticFiles):
+    """Static files the browser must re-check on every load (a 304 is cheap on localhost).
+
+    Without `Cache-Control` Chrome reuses a file for a while after it changed, so a code change
+    could silently not reach the page (the release tail seemed not to work for that reason).
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app(
     settings: Settings | None = None,
     transcriber: TranscriptionService | None = None,
@@ -64,7 +77,7 @@ def create_app(
         await transport.run(Session(transport, settings, transcriber, llm))
 
     # Mounted last so it does not shadow /ws.
-    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+    app.mount("/", RevalidatedStaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
     return app
 
 

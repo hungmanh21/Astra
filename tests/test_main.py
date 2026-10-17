@@ -61,6 +61,16 @@ def test_root_serves_the_frontend(tmp_path):
     assert 'id="mic"' in response.text
 
 
+@pytest.mark.parametrize("path", ["/", "/app.js", "/recorder.js"])
+def test_frontend_files_must_be_revalidated_by_the_browser(path):
+    client = TestClient(create_app(make_settings(), llm=FakeLLM()))
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+    assert "etag" in response.headers  # so the revalidation is a cheap 304
+    assert client.get(path, headers={"if-none-match": response.headers["etag"]}).status_code == 304
+
+
 def test_ws_sends_session_message_on_connect():
     client = TestClient(create_app(make_settings(), llm=FakeLLM()))
     with client.websocket_connect("/ws") as ws:
