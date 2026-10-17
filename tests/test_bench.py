@@ -315,6 +315,18 @@ def test_make_row_without_partials_has_no_lag():
     row = make_row("m", "chunked", result_with_lags([]))
     assert row.partial_count == 0
     assert row.median_lag_ms is None
+    assert row.first_partial_ms is None
+
+
+def test_make_row_records_when_the_first_partial_arrived():
+    row = make_row("m", "redecode", result_with_lags([100, 200]))
+    assert row.first_partial_ms == 1000  # the first event is at 1.0 s
+
+
+def test_the_table_shows_the_first_partial_time():
+    row = make_row("m", "redecode", result_with_lags([100]))
+    first_line = format_table([row]).splitlines()[2]
+    assert first_line.split()[3] == "1000"
 
 
 def test_make_row_scores_the_final_text_against_the_reference():
@@ -344,7 +356,8 @@ def test_format_table_has_a_header_a_rule_and_one_line_per_row():
     lines = format_table(rows).splitlines()
     assert len(lines) == 4
     assert all(
-        word in lines[0] for word in ("model", "strategy", "partials", "lag", "final", "WER")
+        word in lines[0]
+        for word in ("model", "strategy", "partials", "first", "lag", "final", "WER")
     )
     assert set(lines[1]) <= {"-", " "}
     assert "redecode" in lines[2] and "312" in lines[2] and "431" in lines[2] and "4.6" in lines[2]

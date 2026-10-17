@@ -153,3 +153,7 @@
 ## 2026-10-17: Nemotron runs in float16; all three models stay resident
 - Reason: on the fixture fp16 and bf16 gave the same text as fp32 (batch and stream WER 0.0 %) at half the weights (1.2 GB against 2.4 GB). With fp32, `whisper-large-v3`, turbo and Nemotron together used 11.9 GB of the 12.3 GB card (other programs take about 3.8 GB); with fp16 10.3 GB. All three fit, so v1 has no eviction logic (PLAN_v1 S4.6).
 - Constraint: one clip only; S5 checks fp16 on longer clips and `dtype: float32` in `config.yaml` is the way back.
+
+## 2026-10-17: Nemotron keeps `lookahead_tokens: 6` and fp16 after the S5.1 sweep
+- Reason: lookahead 1, 6 and 13 gave the same text within a word on four clips (5 s to 30 s). 6 has a lag of about 100 ms and 6-42 partials; 1 shows the first word earlier (1.1-1.7 s against 1.6-2.1 s) with more GPU calls; 13 is coarse (22 partials in 29 s). fp32 gave the same text and similar times as fp16 on all four clips.
+- Constraint: one run per setting; changing to 1 is a one-line config change if words should appear sooner.

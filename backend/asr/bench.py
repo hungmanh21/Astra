@@ -159,6 +159,7 @@ class BenchRow:
     final_ms: float
     wer: float | None  # None when there is no reference text
     text: str
+    first_partial_ms: float | None = None  # when the first partial arrived, from the start
 
 
 def make_row(
@@ -173,6 +174,7 @@ def make_row(
         final_ms=result.final_ms,
         wer=word_error_rate(reference, result.final.text) if reference else None,
         text=result.final.text,
+        first_partial_ms=result.partials[0].at_s * 1000 if result.partials else None,
     )
 
 
@@ -195,12 +197,13 @@ def _cell(value: float | None, digits: int = 0) -> str:
 
 def format_table(rows: list[BenchRow]) -> str:
     """The summary: a header, a rule, then one aligned line per row. Missing values show `-`."""
-    header = ("model", "strategy", "partials", "lag ms", "final ms", "WER %")
+    header = ("model", "strategy", "partials", "first ms", "lag ms", "final ms", "WER %")
     body = [
         (
             r.model,
             r.strategy,
             str(r.partial_count),
+            _cell(r.first_partial_ms),
             _cell(r.median_lag_ms),
             _cell(r.final_ms),
             _cell(None if r.wer is None else r.wer * 100, 1),

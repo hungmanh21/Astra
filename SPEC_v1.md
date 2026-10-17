@@ -203,6 +203,69 @@ scripts/compare_asr.py  # + --stream [--strategy ...]: real-time feed of a WAV, 
 - [ ] `llm_done.timings` and the turn log carry `stream_strategy`, `partial_count`, `partial_lag_ms` and `final_ms`. A comparison table (model × strategy: latency and WER) is recorded (PLAN_v1 S5).
 - [ ] All v0 tests still pass. Review mode, the 30 s cap and failure handling behave as in v0.
 
+### Measured comparison (PLAN_v1 S5.1)
+
+RTX 3060, fp16 (Nemotron fp16 too), `compare_asr.py --stream --strategy all`, real-time replay, partial interval 500 ms, `chunk_ms` 2000, `partial_min_audio_ms` 1000, Nemotron `lookahead_tokens: 6`. Measured 2026-10-17. "first" is when the first partial arrived from the start of the audio; "lag" is the median `partial_lag_ms`; "final" is `final_ms` (the batch rows are the v0 `asr_ms`). One run each; differences of a word of WER or ~10 % of a time are noise.
+
+**5 s utterance** (`short5`, one LibriSpeech utterance, 12 words)
+
+| Model | Strategy | Partials | first ms | lag ms | final ms | WER % |
+|---|---|---|---|---|---|---|
+| `whisper-large-v3-turbo` | batch | - | - | - | 275 | 0.0 |
+| | `chunked` | 2 | 2250 | 242 | 185 | 16.7 |
+| | `redecode` | 7 | 1204 | 259 | 550 | 0.0 |
+| | `trimmed` | 7 | 1249 | 273 | 607 | 0.0 |
+| `whisper-large-v3` | batch | - | - | - | 812 | 0.0 |
+| | `chunked` | 2 | 2795 | 614 | 353 | 8.3 |
+| | `redecode` | 6 | 1421 | 610 | 1165 | 0.0 |
+| | `trimmed` | 5 | 1479 | 685 | 1025 | 0.0 |
+| `nemotron-streaming-en-0.6b` | batch | - | - | - | 246 | 0.0 |
+| | `chunked` | 2 | 2177 | 206 | 63 | 0.0 |
+| | `redecode` | 8 | 1054 | 160 | 301 | 0.0 |
+| | `native` | 6 | 1549 | 86 | 121 | 0.0 |
+
+**28-30 s turns** (`longA`: three LibriSpeech utterances, 28.1 s; `longB`: one 29.7 s utterance with hard proper names; cells are `longA / longB`; the fixture, 9.9 s, lies between the two and gave the same ranking)
+
+| Model | Strategy | Partials | first ms | lag ms | final ms | WER % |
+|---|---|---|---|---|---|---|
+| `whisper-large-v3-turbo` | batch | - | - | - | 782 / 859 | 3.0 / 10.3 |
+| | `chunked` | 13 / 14 | 2272 / 2219 | 304 / 253 | 311 / 192 | 16.7 / 25.0 |
+| | `redecode` | 42 / 46 | 1200 / 1186 | 468 / 491 | 846 / 1063 | 3.0 / 10.3 |
+| | `trimmed` | 42 / 49 | 1237 / 1220 | 434 / 483 | 1213 / 1178 | 1.5 / 10.3 |
+| `whisper-large-v3` | batch | - | - | - | 3594 / 3681 | 1.5 / 8.8 |
+| | `chunked` | 13 / 14 | 2929 / 2733 | 555 / 566 | 998 / 417 | 6.1 / 17.6 |
+| | `redecode` | 18 / 18 | 1383 / 1428 | 1247 / 1261 | 4896 / 4410 | 1.5 / 8.8 |
+| | `trimmed` | 21 / 17 | 1437 / 1477 | 1203 / 1405 | 3134 / 3891 | 1.5 / 11.8 |
+| `nemotron-streaming-en-0.6b` | batch | - | - | - | 754 / 787 | 1.5 / 13.2 |
+| | `chunked` | 14 / 14 | 2123 / 2129 | 191 / 232 | 57 / 203 | 3.0 / 13.2 |
+| | `redecode` | 48 / 53 | 1616 / 1061 | 316 / 375 | 670 / 831 | 1.5 / 13.2 |
+| | `native` | 38 / 42 | 2086 / 2095 | 99 / 96 | 83 / 87 | 1.5 / 13.2 |
+
+`longB`'s 9-13 % comes from the clip, not the strategy: proper names ("Linnell", "Birket Foster", "idylls") and "Mr." against "mister" in the reference. Every model makes them, and each model's streaming strategies mostly match its own batch row.
+
+**Nemotron `native`, lookahead and precision** (same four clips; `la` is `lookahead_tokens`, chunk = (la + 1) x 80 ms; cells are `short5 / fixture / longA / longB`)
+
+| Setup | Partials | first ms | lag ms | final ms | WER % |
+|---|---|---|---|---|---|
+| fp16, la 1 | 7 / 15 / 42 / 48 | 1139 / 1638 / 1662 / 1631 | 131 / 140 / 132 / 130 | 188 / 255 / 253 / 107 | 0 / 0 / 0 / 14.7 |
+| fp16, la 6 (default) | 6 / 14 / 38 / 42 | 1609 / 1580 / 2113 / 2099 | 101 / 95 / 100 / 100 | 260 / 57 / 51 / 105 | 0 / 0 / 1.5 / 13.2 |
+| fp16, la 13 | 4 / 8 / 22 / 23 | 1572 / 1627 / 2623 / 2581 | 132 / 117 / 96 / 174 | 119 / 72 / 194 / 115 | 0 / 0 / 0 / 13.2 |
+| fp32, la 6 | 6 / 14 / 38 / 42 | 1578 / 1585 / 2160 / 2155 | 86 / 144 / 140 / 80 | 97 / 69 / 49 / 102 | 0 / 0 / 1.5 / 13.2 |
+
+**Baseline (S0.2), v0 batch on the 9.9 s fixture:** `whisper-large-v3` 1499 ms, `whisper-large-v3-turbo` 385 ms. Today's batch rows on the same clip: 1505 ms and 400 ms (Nemotron 357 ms).
+
+**Winners**
+- **Fastest final:** Nemotron `native`, 83-121 ms at 5-30 s in the main run, 49-260 ms across the sweep runs (target: under 300 ms for 5 s). It does not grow with the turn. On Whisper, turbo `redecode` and `trimmed` need 0.5-1.2 s and large-v3 3-5 s on a long turn.
+- **Steadiest partials (lowest lag):** Nemotron `native`, about 100 ms. Turbo `redecode` is 260-490 ms and rises with the turn; large-v3 is 0.6-1.4 s, so it is not a live model.
+- **Most accurate:** large-v3 batch or `redecode` on Whisper (1.5 % and 8.8 %). Nemotron is as good on the clips with plain names (0 % on `short5` and the fixture, 1.5 % on `longA`). `redecode` always equals its model's batch result; `trimmed` is within a word of it on turbo and worse on large-v3 (11.8 %); `chunked` is clearly worst on Whisper (16.7-25 % on turbo) because it cuts words at the chunk edges.
+- **Earliest first words:** the Whisper strategies show something at 1.2-1.5 s, which is `partial_min_audio_ms` plus a decode, but the first partial can be wrong ("it." on `longA` with turbo). Nemotron `native` shows real words from 1.5-2.1 s on a 0.5 s first window; lookahead 1 brings that to 1.1-1.7 s at about the same accuracy.
+
+**Notes and hotspots for the next version**
+- Lookahead: 1, 6 and 13 give the same text within a word. 1 is first and has the most partials but costs more GPU calls; 13 is coarse (22 partials in 29 s). 6 stays the default; 1 is the choice if words should appear sooner. fp16 and fp32 give the same text and similar times (checked on four clips), so fp16 stays.
+- `redecode` and `trimmed` on Whisper pay a full decode per partial, so lag and `final_ms` rise with the turn (turbo `redecode` lag 259 -> 491 ms from 5 s to 30 s). `native` does not.
+- The `native` partial keeps its last word tentative, so a 28 s turn shows the committed text one word behind what the model has heard.
+- Not measured here: LLM first token and a ~5 s utterance in Chrome (the browser timings line has both; the earlier v0 number was ASR + first token about 2.0 s on large-v3).
+
 ## 9. Milestones
 
 See [PLAN_v1.md](PLAN_v1.md):
