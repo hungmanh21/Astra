@@ -164,7 +164,7 @@ turbo `redecode` lag 260-490 ms and `final` 0.5-1.1 s; large-v3 `redecode` lag 0
 | `chunk_ms` | Chunk length of `chunked` (500 and 1000 garble Whisper) | 2000 |
 
 The microphone keeps recording `limits.release_tail_ms` (400 ms) after you let go, and Nemotron gets
-0.5 s of silence after your last sound; without them the last word was sometimes cut off.
+1.5 s of silence after your last sound; without them the last word was sometimes cut off.
 
 A failed partial decode on a Whisper strategy never fails the turn: partials stop and the
 final transcript still arrives. With `native`, a failed chunk ends the model's stream, so that turn

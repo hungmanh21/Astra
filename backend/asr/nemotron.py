@@ -29,10 +29,11 @@ log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
 CHUNK_TIMEOUT_S = 30.0  # longest the worker waits for audio, or `feed` waits for the worker
-# The model needs a little audio after a word to finish it: a turn cut right at the last sound
-# came out as "Ith" for "Ithaca" (and 300 ms of silence after it fixed that). A person releasing
-# the button never leaves that, so every turn gets this much silence appended before its end.
-TAIL_SILENCE_S = 0.5
+# The model emits the last word of a turn late: a clip cut at its last sound came out as "Ith"
+# for "Ithaca", and short quick turns ("Is my English good?") lost "good" until 1.5 s of silence
+# had gone through the model (0.5 s and 1.0 s were not enough; 2 s gained nothing). A person
+# releasing the button leaves far less than that, so every turn gets this much silence appended.
+TAIL_SILENCE_S = 1.5
 
 
 def committed_and_tentative(text: str, final: bool) -> tuple[str, str]:

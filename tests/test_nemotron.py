@@ -24,6 +24,8 @@ FIRST_SAMPLES, CHUNK_SAMPLES = 35, 60
 FIRST_MEL, CHUNK_MEL = 3, 4
 HOP, N_FFT = 10, 40
 
+REAL_TAIL_SILENCE_S = nemotron.TAIL_SILENCE_S  # before the autouse fixture sets it to 0
+
 VOCAB = {0: "", 1: "He", 2: "has", 3: "grave", 4: "doubts", 5: "whether"}
 
 
@@ -245,6 +247,11 @@ def test_no_audio_means_no_tail_and_no_model_run(monkeypatch) -> None:
     adapter = make_adapter([[1]])
     assert adapter.open_stream().finish().text == ""
     assert adapter._model.streams == 0
+
+
+def test_the_real_tail_is_long_enough_for_a_short_quick_turn() -> None:
+    """Measured on real recordings ("Is my English good?", 1 s): 0.5 s and 1.0 s lost "good"."""
+    assert REAL_TAIL_SILENCE_S >= 1.5
 
 
 def test_batch_transcribe_gets_the_same_tail(monkeypatch) -> None:
