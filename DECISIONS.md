@@ -149,3 +149,7 @@
 - Constraint: the model object holds the streaming state, so the adapter allows one stream or batch decode at a time per model and raises `ASRError` on overlap instead of deadlocking the single ASR worker thread. Fine for a single-user v1.
 - Detail: the last word of a native partial is tentative (it may still be growing, "Sir Fred"), the rest is committed; SPEC 6.4 said "no tentative text". `finish` commits everything.
 - Licenses: English NVIDIA Open Model License, 3.5 OpenMDW-1.1; both fine for a personal project.
+
+## 2026-10-17: Nemotron runs in float16; all three models stay resident
+- Reason: on the fixture fp16 and bf16 gave the same text as fp32 (batch and stream WER 0.0 %) at half the weights (1.2 GB against 2.4 GB). With fp32, `whisper-large-v3`, turbo and Nemotron together used 11.9 GB of the 12.3 GB card (other programs take about 3.8 GB); with fp16 10.3 GB. All three fit, so v1 has no eviction logic (PLAN_v1 S4.6).
+- Constraint: one clip only; S5 checks fp16 on longer clips and `dtype: float32` in `config.yaml` is the way back.

@@ -32,7 +32,7 @@ asr:
       model_id: nvidia/nemotron-speech-streaming-en-0.6b
       options:
         device: auto
-        dtype: float32
+        dtype: float16 # same text as float32 on the clips tried, half the memory (DECISIONS)
         lookahead_tokens: 6
 
 # Used from M3 on. LiteLLM model name; the key is GEMINI_API_KEY in .env.

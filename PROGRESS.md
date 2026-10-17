@@ -1,13 +1,17 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 1f1a0a6 Show live partials, the strategy dropdown and streaming timings in the UI (S3.1-S3.3)
-- Test status: 573 pytest tests passing (TrimmedStream and trim_point with a scripted segmented model, Whisper segments with a stubbed pipeline, agreement, bench, chunked and redecode streams, audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
+- Latest commit: 38d2a9b Add the Nemotron adapter with native streaming through Transformers (S4.4)
+- Test status: 616 pytest tests passing (`make check` takes about 1 min: `test_nemotron_real.py` loads the real Nemotron weights three times and is skipped without a GPU or weights; Nemotron adapter with a scripted fake processor and model, TrimmedStream and trim_point with a scripted segmented model, Whisper segments with a stubbed pipeline, agreement, bench, chunked and redecode streams, audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
+- Python 3.13; the venv is `~/.venvs/astra` (the Makefile sets `UV_PROJECT_ENVIRONMENT`; export it for plain `uv` commands, see README)
 - Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]`, `pyyaml`, `pydantic`, `python-dotenv` (plus the original audio libs); dev: `pytest`, `ruff`, `httpx`
 
 ## Completed
+- [x] v1 S4.4: `backend/asr/nemotron.py`, `NemotronASR` (batch `transcribe`, `open_stream`) and `NemotronStream`; a worker thread runs transformers' streaming `generate()` and `feed()` pushes audio windows through a queue; one stream or batch decode at a time per model (busy `ASRError`), a dropped stream frees the model, the last chunk is padded and flushed in `finish`. Config entry `nemotron-streaming-en-0.6b` (`lookahead_tokens: 6`). Fixture: `native` lag 82 ms, `final_ms` 140 ms, WER 0.0 %. `committed_and_tentative` (last word tentative) written by you
+- [x] v1 S4.1-S4.3: venv moved to `~/.venvs/astra` (Makefile default, README); NeMo 3.0.0 installs and imports on Python 3.13 (S4.2), then dropped because Nemotron runs through `transformers` (S4.3 spike: both checkpoints stream at 45-87 ms per chunk, 2.6 GB). Default checkpoint is the English `nvidia/nemotron-speech-streaming-en-0.6b` (DECISIONS 2026-10-17, SPEC_v1 section 10 answers). Licenses: English NVIDIA Open Model License, 3.5 OpenMDW-1.1
+- [x] v1 S3.4: you checked the UI in Chrome and it worked
 - [x] v1 S3.1-S3.3: the UI shows `partial` text in the user's bubble (committed normal, tentative dimmed; stale partials ignored; the transcript replaces it), a "Streaming" dropdown next to the model (per-model choice remembered, sent as `stream_strategy`), and strategy / partial count / lag / `final_ms` in the timings line. Checked with a throwaway Node harness (17 checks) and against the real server; written entirely by Claude
 - [x] S2 follow-ups: `ASRStream.finish(audio)` takes the last samples, so `redecode` and `trimmed` decode once at the end (turbo 30 s `final_ms`: `redecode` 2229 -> 1217 ms and 1803 -> 1469, `trimmed` 1209 -> 691 and 1557 -> 892); Whisper's `max_new_tokens` is capped by the audio length (stops repetition loops); `BatchStream` deleted; `trimmed` keeps at least `partial_min_audio_ms` of audio after a cut. DECISIONS 2026-10-15
 - [x] v1 S2.7: compared all strategies on two natural ~30 s clips and the fixture (numbers in PLAN_v1 Notes); `chunk_ms` is now 2000, the other defaults stay (`redecode`, 500 ms, 1000 ms); DECISIONS 2026-10-15 and SPEC_v1 section 10 record the answers. Recommendation: turbo for live partials, large-v3 for accuracy only. S2 is done
@@ -41,7 +45,7 @@
 - [x] Worklet and recorder logic checked with stubbed Node tests (resampling at 48k/44.1k/16k, 30 s cap, stale-message handling)
 
 ## In Progress
-- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 70%: S0.1, S0.2, S1.1-S1.8, S2.1-S2.7, S3.1-S3.3 done (`chunked`, `redecode` and `trimmed` are real; `BatchStream` is no longer used by the service) (baseline: large-v3 1499 ms, turbo 385 ms on the 9.9 s fixture, in PLAN_v1 Notes).
+- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 85%: S0.1, S0.2, S1.1-S1.8, S2.1-S2.7, S3.1-S3.4, S4.1-S4.4 done (all four strategies are real; Nemotron `native` works end to end in `compare_asr.py`, not yet tried in the browser) (baseline: large-v3 1499 ms, turbo 385 ms on the 9.9 s fixture, in PLAN_v1 Notes).
 - [~] v0 follow-ups not in v1: real vLLM server test (PLAN_v0 T5.4). NeMo adapters and the M0 questions moved into PLAN_v1 S4
 
 ## Known Issues
@@ -55,7 +59,9 @@
 - Firefox unverified: it may refuse a mic stream in a 16 kHz `AudioContext`, and that error is thrown in `createMediaStreamSource`, outside the fallback in `recorder.js`
 - Review nits not done: `log_turn` silently ignores an unknown status; `parse_client_message` builds a `TypeAdapter` per message; a missing `config.yaml` key raises `KeyError` instead of `ConfigError`; `librosa`, `matplotlib`, `scipy` are app dependencies but only `theory/` uses them; `pyproject.toml` description is a placeholder
 - PyPI wheels download slowly from the dev machine (about 20-35 KB/s; Hugging Face is about 8 MB/s). `litellm` is installed now. Plan for extra time when a new dependency like NeMo is needed
-- `.venv` lives on `/mnt/d` (9p mount, about 65x slower for small files). Setting `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/astra` would fix that; not done yet (tried, reverted while bandwidth is bad)
+- The old `.venv` on `/mnt/d` is unused now; delete it (`rm -rf .venv`, 6 GB)
+- Nemotron: lookahead 0 hangs in transformers (first chunk of 200 samples); `lookahead_tokens` default 6 is untuned (S5 compares 1, 6, 13 on longer clips); fp32 only tried; the model allows one stream at a time (a second session streaming at once gets an `asr_error`, fine for single-user v1)
+- Nemotron `native` has not been tried in the browser yet (the UI should list it for `nemotron-streaming-en-0.6b`; check with a live mic)
 - `transformers` prints two warnings on Whisper load (a deprecated `generation_config` plus `begin_suppress_tokens` mix, and `clean_up_tokenization_spaces` for BPE). They come from the library defaults, not our kwargs; the output is correct. Revisit only if they get noisy
 - Whisper load time was about 400 s on the first run because it included the download; measure a warm load for `model_load_ms` expectations
 - M0 checked: Python 3.13, torch 2.14 (CUDA 13.0, RTX 3060 visible), transformers 5.17, fastapi, uvicorn, pydantic all import together and `uv pip check` is clean. Missing: NeMo (deferred, T0.1/T0.3/T0.4)
@@ -66,4 +72,6 @@
 - Whisper may emit text such as "Thank you." on silence or noise; not handled in v0, note what you see in M2
 
 ## Next Steps
-1. S3.4 Chrome check by hand (needs the microphone): turbo and large-v3 with `chunked`, `redecode` and `trimmed`, review mode off and on, and a 30 s auto-stop. Then S4 NeMo and Nemotron, S5 measurements
+1. Try `nemotron-streaming-en-0.6b` with `native`, `chunked` and `redecode` in Chrome (needs the microphone)
+2. S4.5 Parakeet adapter (optional, batch only), S4.6 GPU memory with every model resident (large-v3 + turbo + Nemotron on 12 GB)
+3. S5: measure all strategies on longer clips (Nemotron lookahead 1, 6, 13), tick SPEC_v1 acceptance boxes, final docs

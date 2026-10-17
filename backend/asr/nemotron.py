@@ -273,7 +273,7 @@ class NemotronASR:
         name: str,
         model_id: str,
         device: str = "auto",  # "auto" | "cuda" | "cpu"
-        dtype: str = "float32",
+        dtype: str = "float16",
         lookahead_tokens: int = 6,  # chunk = (n + 1) x 80 ms; English 0/1/6/13, 3.5 0/3/6/13
         language: str | None = None,  # the 3.5 checkpoint needs a locale such as "en-US"
     ) -> None:
