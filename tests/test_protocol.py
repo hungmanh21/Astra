@@ -86,6 +86,7 @@ def test_server_messages_serialize_to_the_wire_shape():
         "asr_models": ["a", "b"],
         "default_asr_model": "a",
         "max_turn_seconds": 30,
+        "release_tail_ms": 0,
         "stream_strategies": {},
     }
     assert TurnStarted(turn_id="t1").model_dump(mode="json") == {

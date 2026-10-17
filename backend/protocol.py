@@ -55,6 +55,7 @@ class SessionInfo(BaseModel):
     asr_models: list[str]
     default_asr_model: str
     max_turn_seconds: float  # the UI auto-stops here, so it never sends a turn the server rejects
+    release_tail_ms: int = 0  # the UI keeps recording this long after the button is released
     stream_strategies: dict[str, StrategyInfo] = Field(default_factory=dict)
 
 

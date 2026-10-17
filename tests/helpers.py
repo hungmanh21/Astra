@@ -29,6 +29,7 @@ def make_settings(
     adapter: str = "tests.test_asr_registry.FakeASR",
     max_history_tokens: int = 1000,
     streaming: StreamingSettings | None = None,
+    release_tail_ms: int = 400,
 ) -> Settings:
     """Settings built by hand. Debug saving is on only when `debug_dir` is given."""
     cfg = ASRModelConfig(adapter=adapter, model_id="fake/model")
@@ -45,6 +46,7 @@ def make_settings(
         debug_save_audio=debug_dir is not None,
         debug_audio_dir=debug_dir or Path("unused"),
         asr_streaming=streaming or StreamingSettings(),
+        release_tail_ms=release_tail_ms,
     )
 
 

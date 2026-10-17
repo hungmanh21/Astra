@@ -94,6 +94,15 @@ def test_connect_sends_session_message():
     assert msg["asr_models"] == MODELS
     assert msg["default_asr_model"] == MODELS[0]
     assert msg["max_turn_seconds"] == 30
+    assert msg["release_tail_ms"] == 400  # Settings' default; the UI keeps recording this long
+
+
+def test_the_session_message_carries_the_configured_release_tail():
+    async def scenario(session, transport):
+        pass
+
+    _, transport = run(scenario, release_tail_ms=900)
+    assert transport.sent[0]["release_tail_ms"] == 900
 
 
 def test_start_turn_acks_with_turn_id():

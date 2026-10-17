@@ -95,3 +95,20 @@ def test_batch_still_works_after_streaming(adapter, clip) -> None:
     audio, reference = clip
     stream_text(adapter, audio)
     assert word_error_rate(reference, adapter.transcribe(audio).text) < 0.1
+
+
+def test_the_last_word_survives_a_turn_that_ends_at_the_last_sound(adapter, clip) -> None:
+    """Released right after the last word: no trailing silence in the audio at all."""
+    audio, _ = clip
+    window = 320  # 20 ms
+    quiet = 0.02 * np.abs(audio).max()
+    loud = [
+        i
+        for i in range(0, len(audio) - window, window)
+        if np.abs(audio[i : i + window]).max() > quiet
+    ]
+    cut = audio[: loud[-1] + window]
+    assert len(audio) - len(cut) > 1600  # the fixture does have silence after the word
+    text, _ = stream_text(adapter, cut)
+    assert text.lower().rstrip(".").endswith("ithaca")
+    assert adapter.transcribe(cut).text.lower().rstrip(".").endswith("ithaca")

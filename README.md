@@ -85,6 +85,7 @@ it before it goes to the LLM. Time spent editing is not counted in the end-to-en
 | `asr.streaming` | Live partials: `default_strategy`, `partial_interval_ms`, `partial_min_audio_ms`, `chunk_ms` (see below) |
 | `llm` | LiteLLM `model`, optional `api_base`, `system_prompt`, `max_history_tokens` |
 | `limits.max_turn_seconds` | Longest accepted recording (30 s) |
+| `limits.release_tail_ms` | How long the UI keeps recording after you let go (400 ms), so the end of the last word is not cut off. 0 switches it off |
 
 Environment variables (in `.env` or the shell):
 
@@ -161,6 +162,9 @@ turbo `redecode` lag 260-490 ms and `final` 0.5-1.1 s; large-v3 `redecode` lag 0
 | `partial_interval_ms` | Least new audio between two partial decodes (`redecode`, `trimmed`) | 500 |
 | `partial_min_audio_ms` | No partial before this much audio (Whisper invents text on tiny clips) | 1000 |
 | `chunk_ms` | Chunk length of `chunked` (500 and 1000 garble Whisper) | 2000 |
+
+The microphone keeps recording `limits.release_tail_ms` (400 ms) after you let go, and Nemotron gets
+0.5 s of silence after your last sound; without them the last word was sometimes cut off.
 
 A failed partial decode on a Whisper strategy never fails the turn: partials stop and the
 final transcript still arrives. With `native`, a failed chunk ends the model's stream, so that turn

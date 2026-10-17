@@ -44,6 +44,8 @@ let retries = 0;
 let micReady = false;
 let phase = "idle"; // idle | recording | processing | reviewing
 let maxTurnSeconds = 30; // SPEC FR-12; replaced by the server's value from the `session` message
+let releaseTailMs = 0; // keep recording this long after release; the `session` message sets it
+let tailTimer = null; // pending stop after a release, or null
 let current = null; // the turn in flight, see newTurn()
 let strategies = {}; // model -> { supported, default }, from the `session` message
 
@@ -156,7 +158,7 @@ function render() {
     els.mic.textContent = "Enable microphone";
     els.hint.textContent = "Click once to allow microphone access.";
   } else if (phase === "recording") {
-    els.mic.textContent = "Release to send";
+    els.mic.textContent = tailTimer === null ? "Release to send" : "Sending…";
     els.hint.textContent = `Recording, max ${maxTurnSeconds} s.`;
   } else if (phase === "processing") {
     els.mic.textContent = "Working…";
@@ -217,7 +219,13 @@ function startTurn() {
   render();
 }
 
+function clearTail() {
+  clearTimeout(tailTimer);
+  tailTimer = null;
+}
+
 function finishRecording() {
+  clearTail();
   phase = "processing";
   current.user.meta.textContent = "Sending…";
   recorder.stop();
@@ -362,7 +370,10 @@ function handleMessage(event) {
     case "error":
       addNotice(msg.message, "error");
       if (current && phase !== "idle") {
-        if (phase === "recording") recorder.cancel();
+        if (phase === "recording") {
+          clearTail();
+          recorder.cancel();
+        }
         current.assistant?.el.remove();
         failTurn();
       }
@@ -404,6 +415,7 @@ function onSession(msg) {
     maxTurnSeconds = msg.max_turn_seconds;
     recorder.setMaxSeconds(maxTurnSeconds);
   }
+  releaseTailMs = msg.release_tail_ms > 0 ? msg.release_tail_ms : 0;
   if (hadSession) addNotice("Reconnected. The conversation history on the server was reset.");
   hadSession = true;
   render();
@@ -433,7 +445,10 @@ function connect() {
   socket.onclose = () => {
     if (socket !== ws) return;
     connected = false;
-    if (phase === "recording") recorder.cancel();
+    if (phase === "recording") {
+      clearTail();
+      recorder.cancel();
+    }
     if (current) {
       addNotice("Connection lost during the turn.", "error");
       failTurn();
@@ -467,8 +482,19 @@ function pressStart() {
   if (phase === "idle") startTurn();
 }
 
+// The mic keeps listening for `releaseTailMs` after release: people let go as they finish the
+// last word, and the end of it is still on its way from the microphone.
 function pressEnd() {
-  if (phase === "recording") finishRecording();
+  if (phase !== "recording" || tailTimer !== null) return;
+  if (releaseTailMs <= 0) {
+    finishRecording();
+    return;
+  }
+  tailTimer = setTimeout(() => {
+    tailTimer = null;
+    if (phase === "recording") finishRecording();
+  }, releaseTailMs);
+  render();
 }
 
 els.mic.addEventListener("pointerdown", (e) => {

@@ -11,6 +11,7 @@ import pytest
 from backend.config import (
     CONFIG_PATH,
     ConfigError,
+    Settings,
     StreamingSettings,
     is_auto_model,
     load_settings,
@@ -236,3 +237,25 @@ def test_the_real_config_yaml_has_the_streaming_section():
     s = load_settings(environ={}).asr_streaming
     assert s.default_strategy == "redecode"
     assert s.chunk_ms > 0
+
+
+def test_release_tail_defaults_to_400_and_the_real_config_sets_it():
+    assert load_settings(environ={}).release_tail_ms == 400
+    assert Settings.release_tail_ms == 400
+
+
+def test_release_tail_is_read_from_the_limits_section(tmp_path):
+    text = YAML.replace("max_turn_seconds: 12", "max_turn_seconds: 12\n  release_tail_ms: 750")
+    assert load_settings(write(tmp_path, text), environ={}).release_tail_ms == 750
+
+
+def test_release_tail_can_be_zero_to_switch_it_off(tmp_path):
+    text = YAML.replace("max_turn_seconds: 12", "max_turn_seconds: 12\n  release_tail_ms: 0")
+    assert load_settings(write(tmp_path, text), environ={}).release_tail_ms == 0
+
+
+@pytest.mark.parametrize("value", ["-1", "3001", "0.5", "true", "slow"])
+def test_release_tail_must_be_a_whole_number_from_0_to_3000(tmp_path, value):
+    text = YAML.replace("max_turn_seconds: 12", f"max_turn_seconds: 12\n  release_tail_ms: {value}")
+    with pytest.raises(ConfigError, match="release_tail_ms"):
+        load_settings(write(tmp_path, text), environ={})

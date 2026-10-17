@@ -46,6 +46,8 @@ llm:
 
 limits:
   max_turn_seconds: 30
+  # The UI keeps recording this long after you let go, so the end of the last word is not cut off
+  release_tail_ms: 400
 
 debug:
   audio_dir: debug_audio # only used when DEBUG_SAVE_AUDIO=1

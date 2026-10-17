@@ -111,6 +111,12 @@ def plain_split(monkeypatch):
     monkeypatch.setattr(nemotron, "committed_and_tentative", lambda text, final: (text, ""))
 
 
+@pytest.fixture(autouse=True)
+def no_tail(monkeypatch):
+    """The window arithmetic is easier to read without the trailing silence; its tests set it."""
+    monkeypatch.setattr(nemotron, "TAIL_SILENCE_S", 0)
+
+
 def audio(n: int) -> np.ndarray:
     return np.arange(n, dtype=np.float32)
 
@@ -194,6 +200,60 @@ def test_finish_pads_the_rest_to_a_full_window_and_returns_the_text() -> None:
     assert result.language == "en"
     assert result.duration_s == pytest.approx(200 / 16000)
     assert result.latency_ms >= 0
+
+
+# --- the silence after the last sound ---
+
+
+def with_tail(monkeypatch, samples: int) -> None:
+    monkeypatch.setattr(nemotron, "TAIL_SILENCE_S", samples / 16000)
+
+
+def test_finish_adds_silence_after_the_audio_before_the_last_window(monkeypatch) -> None:
+    with_tail(monkeypatch, 25)
+    adapter = make_adapter([[1]])
+    stream = adapter.open_stream()
+    data = audio(200)
+    stream.feed(data)
+    result = stream.finish()
+    last = stream_calls(adapter)[-1]
+    start = 170  # as in test_finish_pads_the_rest_to_a_full_window_and_returns_the_text
+    assert np.array_equal(last[: 200 - start], data[start:])
+    assert not last[200 - start :].any()  # 25 samples of tail, then the padding
+    assert result.duration_s == pytest.approx(200 / 16000)  # the real audio, not the tail
+
+
+def test_a_tail_longer_than_a_window_is_sent_as_more_windows(monkeypatch) -> None:
+    with_tail(monkeypatch, 100)
+    adapter = make_adapter([[1]])
+    stream = adapter.open_stream()
+    data = audio(200)
+    stream.feed(data)
+    stream.finish()
+    extended = np.concatenate([data, np.zeros(100, dtype=np.float32)])
+    expected = [extended[:FIRST_SAMPLES]] + [extended[s:e] for s, e in windows(300)]
+    start = 10 + 40 * len(windows(300))  # where the next window would begin
+    expected.append(np.concatenate([extended[start:], np.zeros(CHUNK_SAMPLES - (300 - start))]))
+    got = stream_calls(adapter)
+    assert len(got) == len(expected)
+    for a, b in zip(got, expected, strict=True):
+        assert np.array_equal(a, b)
+
+
+def test_no_audio_means_no_tail_and_no_model_run(monkeypatch) -> None:
+    with_tail(monkeypatch, 25)
+    adapter = make_adapter([[1]])
+    assert adapter.open_stream().finish().text == ""
+    assert adapter._model.streams == 0
+
+
+def test_batch_transcribe_gets_the_same_tail(monkeypatch) -> None:
+    with_tail(monkeypatch, 25)
+    adapter = make_adapter([])
+    result = adapter.transcribe(audio(100))
+    got = adapter._processor.calls[0]["audio"]
+    assert len(got) == 125 and not got[100:].any() and np.array_equal(got[:100], audio(100))
+    assert result.duration_s == pytest.approx(100 / 16000)
 
 
 def test_finish_with_audio_equals_feed_then_finish() -> None:
@@ -289,7 +349,8 @@ def test_a_stream_nobody_feeds_gives_up_and_the_next_feed_says_so(monkeypatch) -
     adapter = make_adapter([[1]])
     stream = adapter.open_stream()
     stream.feed(audio(FIRST_SAMPLES))
-    assert wait_for(lambda: not adapter._lock.locked())
+    # Timed waits can oversleep on WSL2 (seen: 5 s for a 1 s timeout), so the bound is generous.
+    assert wait_for(lambda: not adapter._lock.locked(), seconds=30)
     with pytest.raises(ASRError, match="ended early"):
         stream.feed(audio(100))
 

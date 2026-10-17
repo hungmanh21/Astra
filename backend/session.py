@@ -112,6 +112,7 @@ class Session:
                 asr_models=list(self._settings.asr_models),
                 default_asr_model=self._settings.default_asr_model,
                 max_turn_seconds=self._settings.max_turn_seconds,
+                release_tail_ms=self._settings.release_tail_ms,
                 stream_strategies=self._strategy_infos(),
             )
         )

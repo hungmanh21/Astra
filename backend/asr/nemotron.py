@@ -29,6 +29,10 @@ log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
 CHUNK_TIMEOUT_S = 30.0  # longest the worker waits for audio, or `feed` waits for the worker
+# The model needs a little audio after a word to finish it: a turn cut right at the last sound
+# came out as "Ith" for "Ithaca" (and 300 ms of silence after it fixed that). A person releasing
+# the button never leaves that, so every turn gets this much silence appended before its end.
+TAIL_SILENCE_S = 0.5
 
 
 def committed_and_tentative(text: str, final: bool) -> tuple[str, str]:
@@ -122,13 +126,20 @@ class _Worker:
         yield self._first_features
         while True:
             self._waiting.set()
-            try:
-                audio = self._chunks.get(timeout=CHUNK_TIMEOUT_S)
-            except queue.Empty:
-                return  # nobody feeds us any more: end the stream
+            audio = self._next_chunk()
             if audio is None:
-                return
+                return  # the last chunk was sent, or nobody feeds us any more
             yield self._to_features(audio)
+
+    def _next_chunk(self) -> np.ndarray | None:
+        """The next chunk, or None on the end sentinel or after `CHUNK_TIMEOUT_S` of silence."""
+        deadline = time.monotonic() + CHUNK_TIMEOUT_S
+        while (remaining := deadline - time.monotonic()) > 0:
+            try:
+                return self._chunks.get(timeout=remaining)
+            except queue.Empty:
+                continue  # a timed wait can return early on WSL2; the deadline decides
+        return None
 
     # the streamer interface generate() calls
     def put(self, value: Any) -> None:
@@ -153,7 +164,10 @@ class _Worker:
         self.wait()
 
     def wait(self) -> None:
-        if not self._waiting.wait(CHUNK_TIMEOUT_S) and not self._ended.is_set():
+        deadline = time.monotonic() + CHUNK_TIMEOUT_S
+        while not self._waiting.is_set() and (remaining := deadline - time.monotonic()) > 0:
+            self._waiting.wait(remaining)  # may return early on WSL2; the deadline decides
+        if not self._waiting.is_set() and not self._ended.is_set():
             raise ASRError("Nemotron stream timed out")
         if self._ended.is_set():
             if self._error is not None:
@@ -203,16 +217,18 @@ class NemotronStream:
         start = time.perf_counter()
         if audio is not None and len(audio):
             self._audio = np.concatenate([self._audio, audio.astype(np.float32, copy=False)])
+        duration_s = len(self._audio) / SAMPLE_RATE
         if len(self._audio) == 0:
             text = ""
         else:
+            self._audio = _with_tail_silence(self._audio)
             self._pump(flush=True)
             assert self._worker is not None
             text = self._worker.close()
         return TranscriptResult(
             text=text,
             language="en",
-            duration_s=len(self._audio) / SAMPLE_RATE,
+            duration_s=duration_s,
             latency_ms=(time.perf_counter() - start) * 1000.0,
         )
 
@@ -258,6 +274,11 @@ class NemotronStream:
         self._last_text = text
         committed, tentative = committed_and_tentative(text, final)
         return PartialResult(committed, tentative)
+
+
+def _with_tail_silence(audio: np.ndarray) -> np.ndarray:
+    """`audio` followed by `TAIL_SILENCE_S` of silence (see the constant)."""
+    return np.concatenate([audio, np.zeros(round(TAIL_SILENCE_S * SAMPLE_RATE), dtype=np.float32)])
 
 
 def _padded(audio: np.ndarray, length: int) -> np.ndarray:
@@ -324,7 +345,10 @@ class NemotronASR:
         try:
             start = time.perf_counter()
             inputs = self._processor(
-                audio, sampling_rate=sample_rate, return_tensors="pt", **self._language()
+                _with_tail_silence(audio),
+                sampling_rate=sample_rate,
+                return_tensors="pt",
+                **self._language(),
             ).to(self._model.device, dtype=self._model.dtype)
             with torch.inference_mode():
                 out = self._model.generate(**inputs, return_dict_in_generate=True)

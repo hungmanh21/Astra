@@ -59,6 +59,18 @@ class Settings:
     debug_save_audio: bool
     debug_audio_dir: Path  # absolute, resolved against the repo root
     asr_streaming: StreamingSettings = StreamingSettings()
+    release_tail_ms: int = 400  # the UI keeps recording this long after the button is released
+
+
+def _release_tail_ms(value: object) -> int:
+    """`limits.release_tail_ms`: missing keeps the default, otherwise 0 to 3000."""
+    if value is None:
+        return Settings.release_tail_ms
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 3000:
+        raise ConfigError(
+            f"limits.release_tail_ms must be a whole number from 0 to 3000, got {value!r}"
+        )
+    return value
 
 
 def _parse_flag(name: str, value: str) -> bool:
@@ -173,4 +185,5 @@ def load_settings(
         debug_save_audio=_parse_flag("DEBUG_SAVE_AUDIO", environ.get("DEBUG_SAVE_AUDIO", "")),
         debug_audio_dir=CONFIG_PATH.parent / config["debug"]["audio_dir"],
         asr_streaming=_streaming_settings(config["asr"].get("streaming")),
+        release_tail_ms=_release_tail_ms(config["limits"].get("release_tail_ms")),
     )
