@@ -1,14 +1,20 @@
 # Project Progress
 
 ## Current State
-- Latest commit: 38d2a9b Add the Nemotron adapter with native streaming through Transformers (S4.4)
-- Test status: 616 pytest tests passing (`make check` takes about 1 min: `test_nemotron_real.py` loads the real Nemotron weights three times and is skipped without a GPU or weights; Nemotron adapter with a scripted fake processor and model, TrimmedStream and trim_point with a scripted segmented model, Whisper segments with a stubbed pipeline, agreement, bench, chunked and redecode streams, audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
+- Latest commit: 03a9fc4 Check model, strategy and review switching in one server run by test and accept SPEC_v1 (S5.2)
+- Test status: 640 pytest tests passing (`make check` takes about 1 min: `test_nemotron_real.py` loads the real Nemotron weights three times and is skipped without a GPU or weights; Nemotron adapter with a scripted fake processor and model, TrimmedStream and trim_point with a scripted segmented model, Whisper segments with a stubbed pipeline, agreement, bench, chunked and redecode streams, audio, history, LLM wrapper, turn log, ASR registry/service with a fake adapter, config, protocol, transport, session, main). Whisper itself was run on real weights through `compare_asr.py`, not in pytest. JS logic was checked with throwaway Node scripts, not committed
 - Lint: Ruff (lint + format), passing. `make check` exists and passes
 - Hardware: RTX 3060 (12 GB) on WSL2, `torch.cuda.is_available()` is True.
 - Python 3.13; the venv is `~/.venvs/astra` (the Makefile sets `UV_PROJECT_ENVIRONMENT`; export it for plain `uv` commands, see README)
 - Deps installed: `torch`, `transformers`, `fastapi`, `uvicorn[standard]`, `pyyaml`, `pydantic`, `python-dotenv` (plus the original audio libs); dev: `pytest`, `ruff`, `httpx`
 
 ## Completed
+- [x] v1 S5.2 and acceptance: `tests/test_acceptance.py` runs one WebSocket session over a Whisper-like and a Nemotron-like fake (eight turns switching model, strategy and review mode, one forced LLM failure, the conversation carries on). SPEC_v1 is Accepted; no hand check in Chrome was done for this item (DECISIONS 2026-10-18)
+- [x] Last word still lost on short quick turns (your `debug_audio` clips): the audio had the word (turbo heard "Is my English good?") but Nemotron streaming emits a final word late and needed 1.5 s of silence after it (0.5 and 1.0 s did not help). `TAIL_SILENCE_S` is now 1.5 for `finish` and batch `transcribe` (median `finish` 172 ms at lookahead 6). Frontend files are now served with `Cache-Control: no-cache` and the mic notice shows the release tail. DECISIONS 2026-10-17. Not in the repo: your clips (own voice) as a fixture, needs your consent
+- [x] Last word cut off on quick release (found by you in Chrome, S5.2): the UI now keeps recording `limits.release_tail_ms` (400 ms, in `config.yaml`, sent in the `session` message) after you let go, and Nemotron gets 0.5 s of trailing silence in `finish` and batch `transcribe` (a clip cut at its last sound came out "Ith" for "Ithaca"; a real-model test guards it). Frontend checked with a throwaway Node harness (13 checks, the real `app.js`); DECISIONS 2026-10-17. You said no timings need recording; the LLM first token is not in the SPEC table
+- [x] v1 S5.3 and S5.4: README describes live partials, the four strategies (when to use which), `asr.streaming`, Nemotron and `lookahead_tokens`, `compare_asr.py --stream` and the venv location; a clean clone passed `make check` and its `session` message lists the right strategies per model. SPEC_v1 section 8: 6 of 7 boxes ticked, status "Implemented; two Chrome checks left"
+- [x] v1 S5.1: comparison table in SPEC_v1 section 8 (every model x strategy on a 5 s utterance and two 28-30 s turns, Nemotron lookahead 1/6/13 and fp16/fp32, S0.2 baseline, winners, hotspots). Nemotron `native`: lag ~100 ms, `final_ms` 83-121 ms; turbo `redecode`: lag 260-490 ms, `final_ms` 0.5-1.1 s; large-v3 not live-capable. `compare_asr.py --stream` prints `first ms`. Defaults kept (`lookahead_tokens: 6`, fp16). Not recorded: Chrome live utterance and LLM first token
+- [x] v1 S4.6: all three models resident through the registry use 10.3 GB of the 12.3 GB card (other programs take 3.8 GB), so no eviction logic. Nemotron runs in `float16` (same text as fp32 on the fixture, 1.2 GB against 2.4 GB; DECISIONS 2026-10-17). You tried Nemotron in Chrome: fast, transcript looks decent
 - [x] v1 S4.4: `backend/asr/nemotron.py`, `NemotronASR` (batch `transcribe`, `open_stream`) and `NemotronStream`; a worker thread runs transformers' streaming `generate()` and `feed()` pushes audio windows through a queue; one stream or batch decode at a time per model (busy `ASRError`), a dropped stream frees the model, the last chunk is padded and flushed in `finish`. Config entry `nemotron-streaming-en-0.6b` (`lookahead_tokens: 6`). Fixture: `native` lag 82 ms, `final_ms` 140 ms, WER 0.0 %. `committed_and_tentative` (last word tentative) written by you
 - [x] v1 S4.1-S4.3: venv moved to `~/.venvs/astra` (Makefile default, README); NeMo 3.0.0 installs and imports on Python 3.13 (S4.2), then dropped because Nemotron runs through `transformers` (S4.3 spike: both checkpoints stream at 45-87 ms per chunk, 2.6 GB). Default checkpoint is the English `nvidia/nemotron-speech-streaming-en-0.6b` (DECISIONS 2026-10-17, SPEC_v1 section 10 answers). Licenses: English NVIDIA Open Model License, 3.5 OpenMDW-1.1
 - [x] v1 S3.4: you checked the UI in Chrome and it worked
@@ -45,10 +51,12 @@
 - [x] Worklet and recorder logic checked with stubbed Node tests (resampling at 48k/44.1k/16k, 30 s cap, stale-message handling)
 
 ## In Progress
-- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 85%: S0.1, S0.2, S1.1-S1.8, S2.1-S2.7, S3.1-S3.4, S4.1-S4.4 done (all four strategies are real; Nemotron `native` works end to end in `compare_asr.py`, not yet tried in the browser) (baseline: large-v3 1499 ms, turbo 385 ms on the 9.9 s fixture, in PLAN_v1 Notes).
+- [~] v1 (live partials plus streaming strategy comparison, see `SPEC_v1.md`, `PLAN_v1.md`), about 99%: everything but the optional S4.5 is done and SPEC_v1 is Accepted; the branch is not merged yet: S0.1, S0.2, S1.1-S1.8, S2.1-S2.7, S3.1-S3.4, S4.1-S4.4, S4.6, S5.1-S5.4 done (all four strategies are real; S4.5 Parakeet is optional and skipped for now) (baseline: large-v3 1499 ms, turbo 385 ms on the 9.9 s fixture, in PLAN_v1 Notes).
 - [~] v0 follow-ups not in v1: real vLLM server test (PLAN_v0 T5.4). NeMo adapters and the M0 questions moved into PLAN_v1 S4
 
 ## Known Issues
+- Nemotron commits the last word of short casual turns late (1.1-2.8 s after the end of speech in batch and streaming, against at most 0.4 s on read LibriSpeech); the 1.5 s trailing silence hides it at a cost of about 170 ms in `finish`. Cause investigated (DECISIONS 2026-10-17): the model hedges on the final word (blank 70-95 % for about a second) and preceding speech makes it commit sooner. Options if it still bites: lower the blank bias for the tail frames, use the batch decode as the final for short turns, or prefer Whisper turbo for short turns
+- With `native`, a failed chunk ends the model's stream, so that turn ends with an ASR error (Whisper strategies recover: partials stop, the final still arrives)
 - `trimmed` on `whisper-large-v3` is unreliable: timestamped text sometimes loses punctuation (then it never cuts and the lag grows) and, with a prompt, it dropped a sentence on one clip and repeated the last sentence on another. Not recommended; turbo is the live setup
 - `trimmed` on turbo: WER 5.0 % and 0.0 % on the two long clips (`redecode` 3.3 % and 1.4 %), `final_ms` 0.7-0.9 s (`redecode` 1.2-1.5 s). Still opt-in; on `whisper-large-v3` it stays unreliable
 - `chunked` decodes a trailing-silence remainder and Whisper invents text ("Yeah.", "Thank you."); left as is, a client-side VAD later should send only chunks with real sound (DECISIONS 2026-10-14)
@@ -60,8 +68,7 @@
 - Review nits not done: `log_turn` silently ignores an unknown status; `parse_client_message` builds a `TypeAdapter` per message; a missing `config.yaml` key raises `KeyError` instead of `ConfigError`; `librosa`, `matplotlib`, `scipy` are app dependencies but only `theory/` uses them; `pyproject.toml` description is a placeholder
 - PyPI wheels download slowly from the dev machine (about 20-35 KB/s; Hugging Face is about 8 MB/s). `litellm` is installed now. Plan for extra time when a new dependency like NeMo is needed
 - The old `.venv` on `/mnt/d` is unused now; delete it (`rm -rf .venv`, 6 GB)
-- Nemotron: lookahead 0 hangs in transformers (first chunk of 200 samples); `lookahead_tokens` default 6 is untuned (S5 compares 1, 6, 13 on longer clips); fp32 only tried; the model allows one stream at a time (a second session streaming at once gets an `asr_error`, fine for single-user v1)
-- Nemotron `native` has not been tried in the browser yet (the UI should list it for `nemotron-streaming-en-0.6b`; check with a live mic)
+- Nemotron: lookahead 0 hangs in transformers (first chunk of 200 samples); `lookahead_tokens` default 6 is untuned (S5 compares 1, 6, 13 on longer clips); fp16 checked on the fixture only; the model allows one stream at a time (a second session streaming at once gets an `asr_error`, fine for single-user v1)
 - `transformers` prints two warnings on Whisper load (a deprecated `generation_config` plus `begin_suppress_tokens` mix, and `clean_up_tokenization_spaces` for BPE). They come from the library defaults, not our kwargs; the output is correct. Revisit only if they get noisy
 - Whisper load time was about 400 s on the first run because it included the download; measure a warm load for `model_load_ms` expectations
 - M0 checked: Python 3.13, torch 2.14 (CUDA 13.0, RTX 3060 visible), transformers 5.17, fastapi, uvicorn, pydantic all import together and `uv pip check` is clean. Missing: NeMo (deferred, T0.1/T0.3/T0.4)
@@ -72,6 +79,6 @@
 - Whisper may emit text such as "Thank you." on silence or noise; not handled in v0, note what you see in M2
 
 ## Next Steps
-1. Try `nemotron-streaming-en-0.6b` with `native`, `chunked` and `redecode` in Chrome (needs the microphone)
-2. S4.5 Parakeet adapter (optional, batch only), S4.6 GPU memory with every model resident (large-v3 + turbo + Nemotron on 12 GB)
-3. S5: measure all strategies on longer clips (Nemotron lookahead 1, 6, 13), tick SPEC_v1 acceptance boxes, final docs
+1. Merge branch `v1` into `main` (your call)
+2. Optional: re-try short phrases like "Is my English good" with Nemotron `native` in Chrome; if a word is still lost, the options are in DECISIONS 2026-10-17 (blank bias in tail frames, batch final for short turns, Whisper for short turns). Your `d2c0b40b` clip could become a test fixture, with your consent
+3. Optional S4.5 Parakeet adapter; later: client-side VAD, startup preload, unload-on-switch for models, real vLLM server test
