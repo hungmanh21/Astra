@@ -118,8 +118,8 @@ Goal: native streaming. Mind the slow PyPI downloads (PROGRESS Known Issues).
 
 - [x] **S5.1 Comparison table.** For each model × strategy, record first partial, median `partial_lag_ms`, `partial_count`, `final_ms`, `asr_ms`, final WER and LLM first token, on the fixture (`--stream --strategy all`) and on a ~5 s live utterance in Chrome. Compare with the S0.2 baseline.
   Done when: the table is in SPEC_v1 section 8 (with the S0.2 baseline), and the winner per use (fastest final, most accurate, steadiest partials) plus any hotspot for the next version are noted.
-- [ ] **S5.2 Chrome check on all models.** Nemotron (and Parakeet if added) in the UI with each of their strategies, with review mode on and off, a forced LLM failure, and model and strategy switching without a restart.
-  Done when: you have checked each item in Chrome.
+- [x] **S5.2 Check on all models.** Nemotron (and Parakeet if added) in the UI with each of their strategies, with review mode on and off, a forced LLM failure, and model and strategy switching without a restart.
+  Done when: you have checked each item in Chrome. *(Replaced, by decision of 2026-10-18, with `tests/test_acceptance.py`: one WebSocket session over a Whisper-like and a Nemotron-like fake that switches model, strategy and review mode over eight turns, with one forced LLM failure; the earlier Chrome checks in S3.4 and S4.4 stay as they were. Not covered by a test: the microphone and the real models together.)*
 - [x] **S5.3 README.** Describe streaming (what partials mean, the four strategies and when to use which), `compare_asr.py --stream`, NeMo setup and the venv location, and add Nemotron to the model list.
   Done when: the README steps work on a clean clone (as in v0 T5.7).
 - [x] **S5.4 Final acceptance pass.** Walk through SPEC_v1 section 8 and tick each item, or list what is left. Set the SPEC_v1 status.
