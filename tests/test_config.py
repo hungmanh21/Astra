@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from backend.config import CONFIG_PATH, ConfigError, is_auto_model, load_settings
+from backend.config import (
+    CONFIG_PATH,
+    ConfigError,
+    Settings,
+    StreamingSettings,
+    is_auto_model,
+    load_settings,
+)
 
 YAML = """
 asr:
@@ -162,3 +169,93 @@ def test_auto_model_with_an_api_base_loads_from_yaml_or_environment(tmp_path):
     # The environment can also be what removes the endpoint's partner: auto without a base.
     with pytest.raises(ConfigError, match="api_base"):
         load_settings(write(tmp_path), environ={"LLM_MODEL": "hosted_vllm/auto"})
+
+
+# --- asr.streaming (PLAN_v1 S1.2) ---
+
+STREAMING = """
+  streaming:
+    default_strategy: chunked
+    partial_interval_ms: 250
+    partial_min_audio_ms: 800
+    chunk_ms: 1500
+"""
+
+
+def streaming_yaml(section: str) -> str:
+    return YAML.replace("  default_model: model-b\n", "  default_model: model-b\n" + section)
+
+
+def test_streaming_defaults_when_the_section_is_missing(tmp_path):
+    s = load_settings(write(tmp_path), environ={})
+    assert s.asr_streaming == StreamingSettings()
+    assert s.asr_streaming.default_strategy == "redecode"
+    assert s.asr_streaming.partial_interval_ms == 500
+    assert s.asr_streaming.partial_min_audio_ms == 1000
+    assert s.asr_streaming.chunk_ms == 2000
+
+
+def test_streaming_section_overrides_every_value(tmp_path):
+    s = load_settings(write(tmp_path, streaming_yaml(STREAMING)), environ={})
+    assert s.asr_streaming == StreamingSettings(
+        default_strategy="chunked",
+        partial_interval_ms=250,
+        partial_min_audio_ms=800,
+        chunk_ms=1500,
+    )
+
+
+def test_streaming_missing_keys_keep_their_defaults(tmp_path):
+    section = "  streaming:\n    chunk_ms: 1000\n"
+    s = load_settings(write(tmp_path, streaming_yaml(section)), environ={})
+    assert s.asr_streaming == StreamingSettings(chunk_ms=1000)
+
+
+def test_streaming_empty_section_means_defaults(tmp_path):
+    # `streaming:` with nothing under it parses as None in YAML.
+    s = load_settings(write(tmp_path, streaming_yaml("  streaming:\n")), environ={})
+    assert s.asr_streaming == StreamingSettings()
+
+
+@pytest.mark.parametrize("key", ["partial_interval_ms", "partial_min_audio_ms", "chunk_ms"])
+@pytest.mark.parametrize("value", ["0", "-100", "fast", "true", "1.5"])
+def test_streaming_durations_must_be_positive_ints(tmp_path, key, value):
+    section = f"  streaming:\n    {key}: {value}\n"
+    with pytest.raises(ConfigError, match=key):
+        load_settings(write(tmp_path, streaming_yaml(section)), environ={})
+
+
+@pytest.mark.parametrize("strategy", ["native", "trimmed", "nope"])
+def test_streaming_default_strategy_must_be_generic(tmp_path, strategy):
+    # native and trimmed need an adapter capability, so they cannot be the fallback.
+    section = f"  streaming:\n    default_strategy: {strategy}\n"
+    with pytest.raises(ConfigError, match="default_strategy"):
+        load_settings(write(tmp_path, streaming_yaml(section)), environ={})
+
+
+def test_the_real_config_yaml_has_the_streaming_section():
+    s = load_settings(environ={}).asr_streaming
+    assert s.default_strategy == "redecode"
+    assert s.chunk_ms > 0
+
+
+def test_release_tail_defaults_to_400_and_the_real_config_sets_it():
+    assert load_settings(environ={}).release_tail_ms == 400
+    assert Settings.release_tail_ms == 400
+
+
+def test_release_tail_is_read_from_the_limits_section(tmp_path):
+    text = YAML.replace("max_turn_seconds: 12", "max_turn_seconds: 12\n  release_tail_ms: 750")
+    assert load_settings(write(tmp_path, text), environ={}).release_tail_ms == 750
+
+
+def test_release_tail_can_be_zero_to_switch_it_off(tmp_path):
+    text = YAML.replace("max_turn_seconds: 12", "max_turn_seconds: 12\n  release_tail_ms: 0")
+    assert load_settings(write(tmp_path, text), environ={}).release_tail_ms == 0
+
+
+@pytest.mark.parametrize("value", ["-1", "3001", "0.5", "true", "slow"])
+def test_release_tail_must_be_a_whole_number_from_0_to_3000(tmp_path, value):
+    text = YAML.replace("max_turn_seconds: 12", f"max_turn_seconds: 12\n  release_tail_ms: {value}")
+    with pytest.raises(ConfigError, match="release_tail_ms"):
+        load_settings(write(tmp_path, text), environ={})

@@ -1,6 +1,6 @@
 # Voice Agent v0: Implementation Plan
 
-**Spec:** [SPEC.md](SPEC.md)
+**Spec:** [SPEC_v0.md](SPEC_v0.md)
 **Status:** Draft
 **Last updated:** 2026-09-30
 

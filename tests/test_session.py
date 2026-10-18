@@ -94,6 +94,15 @@ def test_connect_sends_session_message():
     assert msg["asr_models"] == MODELS
     assert msg["default_asr_model"] == MODELS[0]
     assert msg["max_turn_seconds"] == 30
+    assert msg["release_tail_ms"] == 400  # Settings' default; the UI keeps recording this long
+
+
+def test_the_session_message_carries_the_configured_release_tail():
+    async def scenario(session, transport):
+        pass
+
+    _, transport = run(scenario, release_tail_ms=900)
+    assert transport.sent[0]["release_tail_ms"] == 900
 
 
 def test_start_turn_acks_with_turn_id():
@@ -1000,7 +1009,17 @@ def test_a_reply_with_no_text_has_no_first_token_time():
 # --- M5: one structured log line per turn (T5.3) ---
 
 TURN_LOG = "astra.turns"
-TIMING_KEYS = {"audio_s", "asr_ms", "llm_ttft_ms", "llm_total_ms", "e2e_ms"}
+TIMING_KEYS = {
+    "audio_s",
+    "asr_ms",
+    "llm_ttft_ms",
+    "llm_total_ms",
+    "e2e_ms",
+    "stream_strategy",
+    "partial_count",
+    "partial_lag_ms",
+    "final_ms",
+}
 
 
 def turn_records(caplog):
@@ -1034,7 +1053,13 @@ def test_a_good_turn_logs_one_ok_record_with_all_fields(caplog):
     assert set(record["timings"]) == TIMING_KEYS
     assert record["timings"]["audio_s"] == 0.5
     assert record["timings"]["asr_ms"] == 12.5
-    assert all(isinstance(v, int | float) for v in record["timings"].values())
+    # A turn without partials: zero partials, no lag, but the strategy and final_ms are real.
+    assert record["timings"]["partial_count"] == 0
+    assert record["timings"]["partial_lag_ms"] is None
+    assert record["timings"]["stream_strategy"] == "redecode"
+    assert record["timings"]["final_ms"] is not None
+    numbers = {k: v for k, v in record["timings"].items() if v is not None}
+    assert all(isinstance(v, int | float) for k, v in numbers.items() if k != "stream_strategy")
 
 
 def test_the_logged_timings_are_the_ones_sent_to_the_browser(caplog):

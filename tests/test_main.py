@@ -10,6 +10,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from backend.asr.base import TranscriptResult
 from backend.asr.service import TranscriptionService
+from backend.config import StreamingSettings
 from backend.llm import LLMClient
 from backend.main import create_app
 from tests.helpers import MODELS, FakeLLM, FakeTranscriber, chunks, make_settings, pcm
@@ -58,6 +59,16 @@ def test_root_serves_the_frontend(tmp_path):
     response = client.get("/")
     assert response.status_code == 200
     assert 'id="mic"' in response.text
+
+
+@pytest.mark.parametrize("path", ["/", "/app.js", "/recorder.js"])
+def test_frontend_files_must_be_revalidated_by_the_browser(path):
+    client = TestClient(create_app(make_settings(), llm=FakeLLM()))
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+    assert "etag" in response.headers  # so the revalidation is a cheap 304
+    assert client.get(path, headers={"if-none-match": response.headers["etag"]}).status_code == 304
 
 
 def test_ws_sends_session_message_on_connect():
@@ -217,3 +228,20 @@ def test_create_app_sets_up_logging_so_turn_lines_are_visible():
     finally:
         root.handlers[:] = saved[0]
         root.setLevel(saved[1])
+
+
+def test_session_message_lists_strategies_from_the_real_service():
+    client = TestClient(create_app(make_settings(), llm=FakeLLM()))
+    with client.websocket_connect("/ws") as ws:
+        info = ws.receive_json()
+    plain = {"supported": ["chunked", "redecode"], "default": "redecode"}
+    assert info["stream_strategies"] == {name: plain for name in MODELS}
+    assert FakeASR.load_calls == 0  # listing strategies must not load a model
+
+
+def test_create_app_passes_the_streaming_settings_to_the_service():
+    settings = make_settings(streaming=StreamingSettings(default_strategy="chunked"))
+    client = TestClient(create_app(settings, llm=FakeLLM()))
+    with client.websocket_connect("/ws") as ws:
+        info = ws.receive_json()
+    assert info["stream_strategies"][MODELS[0]]["default"] == "chunked"

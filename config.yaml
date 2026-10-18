@@ -3,6 +3,12 @@
 
 asr:
   default_model: whisper-large-v3
+  # Live partials (SPEC_v1 6.5). Starting values; S2.7 tunes them from compare_asr.py --stream.
+  streaming:
+    default_strategy: redecode # for models without native streaming
+    partial_interval_ms: 500 # least new audio between two partial decodes (redecode, trimmed)
+    partial_min_audio_ms: 1000 # no partial before this much audio (Whisper invents text on tiny clips)
+    chunk_ms: 2000 # chunk length for the `chunked` strategy (500 and 1000 garble Whisper, see DECISIONS)
   models:
     whisper-large-v3:
       adapter: backend.asr.whisper.WhisperASR
@@ -18,6 +24,17 @@ asr:
         device: auto
         dtype: float16
 
+    # Streams natively (strategy `native`). lookahead_tokens sets the chunk: (n + 1) x 80 ms.
+    # English checkpoint: 0 (hangs in transformers), 1, 6 or 13. The multilingual
+    # nvidia/nemotron-3.5-asr-streaming-0.6b also works: 3, 6 or 13, and `language: en-US`.
+    nemotron-streaming-en-0.6b:
+      adapter: backend.asr.nemotron.NemotronASR
+      model_id: nvidia/nemotron-speech-streaming-en-0.6b
+      options:
+        device: auto
+        dtype: float16 # same text as float32 on the clips tried, half the memory (DECISIONS)
+        lookahead_tokens: 6
+
 # Used from M3 on. LiteLLM model name; the key is GEMINI_API_KEY in .env.
 llm:
   model: gemini/gemini-3.5-flash-lite
@@ -29,6 +46,8 @@ llm:
 
 limits:
   max_turn_seconds: 30
+  # The UI keeps recording this long after you let go, so the end of the last word is not cut off
+  release_tail_ms: 400
 
 debug:
   audio_dir: debug_audio # only used when DEBUG_SAVE_AUDIO=1

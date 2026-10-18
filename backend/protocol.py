@@ -15,6 +15,7 @@ class StartTurn(BaseModel):
     type: Literal["start_turn"]
     asr_model: str
     review: bool = False
+    stream_strategy: str | None = None
 
 
 class EndTurn(BaseModel):
@@ -43,12 +44,19 @@ ClientMessage = Annotated[
 # --- server -> client ---
 
 
+class StrategyInfo(BaseModel):
+    supported: list[str]
+    default: str
+
+
 class SessionInfo(BaseModel):
     type: Literal["session"] = "session"
     session_id: str
     asr_models: list[str]
     default_asr_model: str
     max_turn_seconds: float  # the UI auto-stops here, so it never sends a turn the server rejects
+    release_tail_ms: int = 0  # the UI keeps recording this long after the button is released
+    stream_strategies: dict[str, StrategyInfo] = Field(default_factory=dict)
 
 
 class TurnStarted(BaseModel):
@@ -56,11 +64,19 @@ class TurnStarted(BaseModel):
     turn_id: str
 
 
+class Partial(BaseModel):
+    type: Literal["partial"] = "partial"
+    turn_id: str
+    committed: str
+    tentative: str
+
+
 class Transcript(BaseModel):
     type: Literal["transcript"] = "transcript"
     turn_id: str
     text: str
     asr_ms: float
+    stream_strategy: str | None = None
 
 
 class LlmDelta(BaseModel):
@@ -75,6 +91,10 @@ class Timings(BaseModel):
     llm_ttft_ms: float | None = None
     llm_total_ms: float | None = None
     e2e_ms: float | None = None
+    stream_strategy: str | None = None
+    partial_count: int | None = None
+    partial_lag_ms: float | None = None
+    final_ms: float | None = None
 
 
 class LlmDone(BaseModel):
@@ -90,7 +110,7 @@ class ErrorMessage(BaseModel):
     message: str  # shown to the user, no internals
 
 
-ServerMessage = SessionInfo | TurnStarted | Transcript | LlmDelta | LlmDone | ErrorMessage
+ServerMessage = SessionInfo | TurnStarted | Transcript | LlmDelta | LlmDone | ErrorMessage | Partial
 
 
 class ProtocolError(ValueError):

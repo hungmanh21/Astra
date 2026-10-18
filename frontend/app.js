@@ -11,6 +11,7 @@ const els = {
   chat: $("chat"),
   status: $("status"),
   model: $("model"),
+  strategy: $("strategy"),
   review: $("review"),
   reset: $("reset"),
   hint: $("hint"),
@@ -43,7 +44,10 @@ let retries = 0;
 let micReady = false;
 let phase = "idle"; // idle | recording | processing | reviewing
 let maxTurnSeconds = 30; // SPEC FR-12; replaced by the server's value from the `session` message
+let releaseTailMs = 0; // keep recording this long after release; the `session` message sets it
+let tailTimer = null; // pending stop after a release, or null
 let current = null; // the turn in flight, see newTurn()
+let strategies = {}; // model -> { supported, default }, from the `session` message
 
 const recorder = new Recorder({
   maxSeconds: maxTurnSeconds,
@@ -91,6 +95,27 @@ function setText(bubble, message) {
   bubble.text.classList.remove("pending");
 }
 
+// Both parts are the full text so far, not deltas. Committed text is final; tentative text may
+// change on the next partial, so it is dimmed. textContent only, never HTML.
+function setPartial(bubble, committed, tentative) {
+  const nodes = [];
+  if (committed) {
+    const span = document.createElement("span");
+    span.className = "committed";
+    span.textContent = committed;
+    nodes.push(span);
+  }
+  if (committed && tentative) nodes.push(document.createTextNode(" "));
+  if (tentative) {
+    const span = document.createElement("span");
+    span.className = "tentative";
+    span.textContent = tentative;
+    nodes.push(span);
+  }
+  bubble.text.classList.remove("pending");
+  bubble.text.replaceChildren(...nodes);
+}
+
 function fmtMs(ms) {
   return ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${Math.round(ms)} ms`;
 }
@@ -98,6 +123,13 @@ function fmtMs(ms) {
 function fmtTimings(t) {
   const parts = [];
   if (t.audio_s != null) parts.push(`audio ${t.audio_s.toFixed(1)} s`);
+  if (t.stream_strategy) parts.push(t.stream_strategy);
+  // 0 partials is a real answer (a short turn, or partials failed); null means "not measured".
+  if (t.partial_count != null) {
+    const lag = t.partial_lag_ms != null ? `, lag ${fmtMs(t.partial_lag_ms)}` : "";
+    parts.push(`${t.partial_count} ${t.partial_count === 1 ? "partial" : "partials"}${lag}`);
+  }
+  if (t.final_ms != null) parts.push(`final ${fmtMs(t.final_ms)}`);
   if (t.asr_ms != null) parts.push(`ASR ${fmtMs(t.asr_ms)}`);
   if (t.llm_ttft_ms != null) parts.push(`first token ${fmtMs(t.llm_ttft_ms)}`);
   if (t.llm_total_ms != null) parts.push(`LLM ${fmtMs(t.llm_total_ms)}`);
@@ -115,6 +147,7 @@ function render() {
   els.mic.disabled = !connected || (phase !== "idle" && phase !== "recording");
   els.mic.classList.toggle("recording", phase === "recording");
   els.model.disabled = !idle || els.model.options.length === 0;
+  els.strategy.disabled = !idle || els.strategy.options.length === 0;
   els.review.disabled = phase !== "idle";
   els.reset.disabled = !idle;
 
@@ -125,7 +158,7 @@ function render() {
     els.mic.textContent = "Enable microphone";
     els.hint.textContent = "Click once to allow microphone access.";
   } else if (phase === "recording") {
-    els.mic.textContent = "Release to send";
+    els.mic.textContent = tailTimer === null ? "Release to send" : "Sending…";
     els.hint.textContent = `Recording, max ${maxTurnSeconds} s.`;
   } else if (phase === "processing") {
     els.mic.textContent = "Working…";
@@ -144,7 +177,16 @@ function render() {
 function newTurn(review) {
   const user = addBubble("user");
   setPending(user, "Recording…");
-  return { id: null, review, user, assistant: null, reply: "", sending: false };
+  return {
+    id: null,
+    review,
+    user,
+    assistant: null,
+    reply: "",
+    sending: false,
+    hasPartial: false, // a partial is on screen, so "Transcribing…" must not replace it
+    final: false, // the `transcript` arrived; later partials are stale
+  };
 }
 
 function endTurn() {
@@ -169,13 +211,21 @@ function startTurn() {
   const review = els.review.checked;
   current = newTurn(review);
   current.sending = true;
-  send({ type: "start_turn", asr_model: els.model.value, review });
+  const msg = { type: "start_turn", asr_model: els.model.value, review };
+  if (els.strategy.value) msg.stream_strategy = els.strategy.value; // else the model's default
+  send(msg);
   recorder.start();
   phase = "recording";
   render();
 }
 
+function clearTail() {
+  clearTimeout(tailTimer);
+  tailTimer = null;
+}
+
 function finishRecording() {
+  clearTail();
   phase = "processing";
   current.user.meta.textContent = "Sending…";
   recorder.stop();
@@ -194,7 +244,7 @@ function onStopped(totalSamples) {
   if (!current || !current.sending) return;
   current.sending = false;
   current.audioSeconds = totalSamples / SAMPLE_RATE;
-  setPending(current.user, "Transcribing…");
+  if (!current.hasPartial) setPending(current.user, "Transcribing…");
   current.user.meta.textContent = `${current.audioSeconds.toFixed(1)} s audio`;
   send({ type: "end_turn" });
 }
@@ -278,8 +328,18 @@ function handleMessage(event) {
     case "turn_started":
       if (current && current.id === null) current.id = msg.turn_id;
       break;
+    case "partial":
+      // Stricter than `mine`: the turn must be acknowledged, and the transcript must not have
+      // arrived yet (a partial after it is stale).
+      if (!current || current.id === null || msg.turn_id !== current.id || current.final) break;
+      if (!msg.committed && !msg.tentative) break;
+      setPartial(current.user, msg.committed ?? "", msg.tentative ?? "");
+      current.hasPartial = true;
+      scrollToEnd();
+      break;
     case "transcript":
       if (!mine) break;
+      current.final = true;
       setText(current.user, msg.text || "(no speech detected)");
       current.user.meta.textContent = [
         `${(current.audioSeconds ?? 0).toFixed(1)} s audio`,
@@ -310,7 +370,10 @@ function handleMessage(event) {
     case "error":
       addNotice(msg.message, "error");
       if (current && phase !== "idle") {
-        if (phase === "recording") recorder.cancel();
+        if (phase === "recording") {
+          clearTail();
+          recorder.cancel();
+        }
         current.assistant?.el.remove();
         failTurn();
       }
@@ -318,6 +381,22 @@ function handleMessage(event) {
     default:
       console.warn("unknown message type", msg);
   }
+}
+
+// The strategies of the selected model, with its saved choice (per model) or its default.
+function fillStrategies() {
+  const info = strategies[els.model.value];
+  els.strategy.replaceChildren(
+    ...(info?.supported ?? []).map((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name === info.default ? `${name} (default)` : name;
+      return option;
+    }),
+  );
+  if (!info) return;
+  const saved = store.get(`astra.strategy.${els.model.value}`);
+  els.strategy.value = info.supported.includes(saved) ? saved : info.default;
 }
 
 function onSession(msg) {
@@ -330,10 +409,13 @@ function onSession(msg) {
     }),
   );
   els.model.value = msg.asr_models.includes(saved) ? saved : msg.default_asr_model;
+  strategies = msg.stream_strategies ?? {};
+  fillStrategies();
   if (msg.max_turn_seconds > 0) {
     maxTurnSeconds = msg.max_turn_seconds;
     recorder.setMaxSeconds(maxTurnSeconds);
   }
+  releaseTailMs = msg.release_tail_ms > 0 ? msg.release_tail_ms : 0;
   if (hadSession) addNotice("Reconnected. The conversation history on the server was reset.");
   hadSession = true;
   render();
@@ -363,7 +445,10 @@ function connect() {
   socket.onclose = () => {
     if (socket !== ws) return;
     connected = false;
-    if (phase === "recording") recorder.cancel();
+    if (phase === "recording") {
+      clearTail();
+      recorder.cancel();
+    }
     if (current) {
       addNotice("Connection lost during the turn.", "error");
       failTurn();
@@ -381,7 +466,9 @@ async function enableMic() {
   try {
     await recorder.init();
     micReady = true;
-    addNotice(`Microphone ready (audio context at ${recorder.sampleRate} Hz).`);
+    addNotice(
+      `Microphone ready (audio context at ${recorder.sampleRate} Hz, keeps recording ${releaseTailMs} ms after release).`,
+    );
   } catch (err) {
     addNotice(`Microphone unavailable: ${err.message}`, "error");
   }
@@ -397,8 +484,19 @@ function pressStart() {
   if (phase === "idle") startTurn();
 }
 
+// The mic keeps listening for `releaseTailMs` after release: people let go as they finish the
+// last word, and the end of it is still on its way from the microphone.
 function pressEnd() {
-  if (phase === "recording") finishRecording();
+  if (phase !== "recording" || tailTimer !== null) return;
+  if (releaseTailMs <= 0) {
+    finishRecording();
+    return;
+  }
+  tailTimer = setTimeout(() => {
+    tailTimer = null;
+    if (phase === "recording") finishRecording();
+  }, releaseTailMs);
+  render();
 }
 
 els.mic.addEventListener("pointerdown", (e) => {
@@ -423,7 +521,14 @@ document.addEventListener("keyup", (e) => {
   pressEnd();
 });
 
-els.model.addEventListener("change", () => store.set("astra.model", els.model.value));
+els.model.addEventListener("change", () => {
+  store.set("astra.model", els.model.value);
+  fillStrategies();
+  render();
+});
+els.strategy.addEventListener("change", () =>
+  store.set(`astra.strategy.${els.model.value}`, els.strategy.value),
+);
 els.review.addEventListener("change", () => store.set("astra.review", els.review.checked ? "1" : "0"));
 els.reset.addEventListener("click", () => {
   if (send({ type: "reset" })) {
